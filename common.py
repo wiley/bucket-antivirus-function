@@ -43,8 +43,8 @@ AV_PROCESS_ORIGINAL_VERSION_ONLY = os.getenv(
 )
 AV_DELETE_INFECTED_FILES = os.getenv("AV_DELETE_INFECTED_FILES", "False")
 
-AV_DEFINITION_FILE_PREFIXES = ["main", "daily", "bytecode"]
-AV_DEFINITION_FILE_SUFFIXES = ["cld", "cvd"]
+AV_DEFINITION_FILE_PREFIXES = ["main", "daily", "bytecode", "whitelist"]
+AV_DEFINITION_FILE_SUFFIXES = ["cld", "cvd", "ign2"]
 
 
 def create_dir(path):
