@@ -44,10 +44,26 @@ clamd_pid = None
 
 
 def event_object(event, event_source="s3"):
+    s3 = boto3.resource("s3")
 
     # SNS events are slightly different
     if event_source.upper() == "SNS":
         event = json.loads(event["Records"][0]["Sns"]["Message"])
+
+    if event_source.upper() == "S3-BATCH":
+        event = json.loads(event["tasks"][0])
+
+        bucket_arn = event.get("s3BucketArn", None)
+        key_name = event.get('"s3Key', None)
+
+        if (not bucket_arn) or (not key_name):
+            raise Exception("Unable to retrieve object from event.\n{}".format(event))
+
+        bucket_name = bucket_arn.split(':')[-1]
+
+        key_name = unquote_plus(key_name)
+
+        return s3.Object(bucket_name, key_name)
 
     # Break down the record
     records = event["Records"]
@@ -74,8 +90,6 @@ def event_object(event, event_source="s3"):
     if (not bucket_name) or (not key_name):
         raise Exception("Unable to retrieve object from event.\n{}".format(event))
 
-    # Create and return the object
-    s3 = boto3.resource("s3")
     return s3.Object(bucket_name, key_name)
 
 
@@ -289,6 +303,19 @@ def lambda_handler(event, context):
     stop_scan_time = get_timestamp()
     print("Script finished at %s\n" % stop_scan_time)
 
+    if EVENT_SOURCE.upper() == "S3-BATCH":
+        return {
+            "invocationSchemaVersion": event["invocationSchemaVersion"],
+            "treatMissingKeysAs": "PermanentFailure",
+            "invocationId": event["invocationId"],
+            "results": [
+                {
+                    "taskId": event["tasks"][0]['taskId'],
+                    "resultCode": "Succeeded",
+                    "resultString": scan_result,
+                }
+            ]
+        }
 
 def str_to_bool(s):
     return bool(strtobool(str(s)))
