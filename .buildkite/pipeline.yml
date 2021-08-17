@@ -1,0 +1,30 @@
+steps:
+  - label: ':s3: Upload it to S3 (hetest)'
+    agents:
+      docker: 'true'
+    branches: master test-*
+    concurrency: 1
+    commands: 
+      - make all
+      - aws s3 cp build/lambda.zip s3://hetest-s3-antivirus-lambda-code/bucket-antivirus-function-$BUILDKITE_BUILD_NUMBER.zip
+    concurrency_group: $BUILDKITE_PIPELINE_SLUG/deploy-hetest
+    key: deploy_test
+    plugins:
+      - cultureamp/aws-assume-role#v0.1.0:
+          role: arn:aws:iam::530261158904:role/buildkite-$BUILDKITE_PIPELINE_SLUG
+
+  - label: ':s3: Upload it to S3 (heaws)'
+    agents:
+      docker: 'true'
+    branches: master
+    concurrency: 1
+    commands: 
+      - make all
+      - aws s3 cp build/lambda.zip s3://heaws-s3-antivirus-lambda-code/bucket-antivirus-function-$BUILDKITE_BUILD_NUMBER.zip
+    concurrency_group: $BUILDKITE_PIPELINE_SLUG/deploy-heaws
+    depends_on:
+      - deploy_test
+    key: deploy_prod
+    plugins:
+      - cultureamp/aws-assume-role#v0.1.0:
+          role: arn:aws:iam::340978087534:role/buildkite-$BUILDKITE_PIPELINE_SLUG

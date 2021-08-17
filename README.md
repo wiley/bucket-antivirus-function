@@ -273,7 +273,7 @@ the table below for reference.
 | DATADOG_API_KEY | API Key for pushing metrics to DataDog (optional)                                               | | No |
 | AV_PROCESS_ORIGINAL_VERSION_ONLY | Controls that only original version of an S3 key is processed (if bucket versioning is enabled) | False | No |
 | AV_DELETE_INFECTED_FILES | Controls whether infected files should be automatically deleted                                 | False | No |
-| EVENT_SOURCE | The source of antivirus scan event "S3" or "SNS" (optional)                                     | S3 | No |
+| EVENT_SOURCE | The source of antivirus scan event "S3", "SNS" or "S3-BATCH" (optional)                         | S3 | No |
 | AV_EFS_MOUNT_POINT | EFS mount point that used to scan larger files that does not fit lambda's storage (optional)    | | No |
 
 ## S3 Bucket Policy Examples
