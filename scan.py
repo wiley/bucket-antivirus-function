@@ -51,13 +51,9 @@ def event_object(event, event_source="s3"):
         event = json.loads(event["Records"][0]["Sns"]["Message"])
 
     if event_source.upper() == "S3-BATCH":
-        event = json.loads(event["tasks"][0])
-
-        bucket_arn = event.get("s3BucketArn", None)
-        key_name = event.get('"s3Key', None)
-
-        if (not bucket_arn) or (not key_name):
-            raise Exception("Unable to retrieve object from event.\n{}".format(event))
+        task = event['tasks'][0]
+        bucket_arn = task['s3BucketArn']
+        key_name = task['s3Key']
 
         bucket_name = bucket_arn.split(':')[-1]
 
