@@ -16,13 +16,13 @@ common-deploy-options: &common-deploy-options
   concurrency: 1
 
 steps:
-  - label: ':box: Compile application package'
+  - label: 'Compile application package'
     agents:
       docker: 'true'
     artifact_paths:
       - build/lambda.zip
     commands:
-      - ./build.sh
+      - .buildkite/deploy.sh
     key: build
     plugins:
       - cultureamp/aws-assume-role#v0.1.0:
