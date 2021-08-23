@@ -22,7 +22,7 @@ steps:
     artifact_paths:
       - build/lambda.zip
     commands:
-      - .buildkite/deploy.sh
+      - make all
     key: build
     plugins:
       - cultureamp/aws-assume-role#v0.1.0:
