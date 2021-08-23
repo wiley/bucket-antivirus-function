@@ -27,9 +27,6 @@ steps:
     plugins:
       - cultureamp/aws-assume-role#v0.1.0:
           role: arn:aws:iam::530261158904:role/buildkite-$BUILDKITE_PIPELINE_SLUG
-      - docker#v3.3.0:
-          <<: *docker-env
-          image: amazonlinux:2
 
   - label: ':rocket: Deploy Away! (hetest)'
     agents:
