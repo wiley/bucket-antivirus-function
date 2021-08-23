@@ -1,0 +1,73 @@
+env:
+  DOCKER_BUILD_TAG: bk-$BUILDKITE_BRANCH-$BUILDKITE_BUILD_NUMBER
+  ECR_REPO_URL: 340978087534.dkr.ecr.ap-southeast-2.amazonaws.com/$BUILDKITE_PIPELINE_SLUG
+
+docker-env: &docker-env
+  environment:
+    - AWS_ACCESS_KEY_ID
+    - AWS_SECRET_ACCESS_KEY
+    - AWS_SECURITY_TOKEN
+    - AWS_SESSION_TOKEN
+
+common-deploy-options: &common-deploy-options
+  agents:
+    docker: 'true'
+  branches: master
+  concurrency: 1
+
+steps:
+  - label: ':box: Compile application package'
+    agents:
+      docker: 'true'
+    artifact_paths:
+      - build/lambda.zip
+    commands:
+      - ./build.sh
+    key: build
+    plugins:
+      - cultureamp/aws-assume-role#v0.1.0:
+          role: arn:aws:iam::530261158904:role/buildkite-$BUILDKITE_PIPELINE_SLUG
+      - docker#v3.3.0:
+          <<: *docker-env
+          image: amazonlinux:2
+
+  - label: ':rocket: Deploy Away! (hetest)'
+    agents:
+      docker: 'true'
+    branches: master test-*
+    concurrency: 1
+    command: .buildkite/deploy.sh hetest $BUILDKITE_BUILD_NUMBER
+    concurrency_group: $BUILDKITE_PIPELINE_SLUG/deploy-hetest
+    depends_on:
+      - build
+    key: deploy_test
+    plugins:
+      - cultureamp/aws-assume-role#v0.1.0:
+          role: arn:aws:iam::530261158904:role/buildkite-$BUILDKITE_PIPELINE_SLUG
+      - docker#v3.3.0:
+          <<: *docker-env
+          image: node:14.2
+          propagate-environment: true
+
+  # - label: ':rocket: Deploy Away! (prod)'
+  #   <<: *common-deploy-options
+  #   command: .buildkite/deploy.sh -s prod
+  #   concurrency_group: $BUILDKITE_PIPELINE_SLUG/deploy-heaws
+  #   depends_on:
+  #     - deploy_test
+  #   key: deployment
+  #   plugins:
+  #     - cultureamp/aws-assume-role#v0.1.0:
+  #         role: arn:aws:iam::340978087534:role/buildkite-$BUILDKITE_PIPELINE_SLUG
+  #     - docker#v3.3.0:
+  #         <<: *docker-env
+  #         image: node:14.2
+  #         propagate-environment: true
+
+  # - label: ':slack: Notify slack'
+  #   agents:
+  #     cluster: prod1
+  #     queue: deploy
+  #   branches: master
+  #   command: post-deploy $BUILDKITE_PIPELINE_SLUG bucket-antivirus-function deploy
+  #   depends_on: deployment
