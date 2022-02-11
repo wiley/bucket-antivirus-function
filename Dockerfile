@@ -13,7 +13,7 @@ COPY requirements.txt /opt/app/requirements.txt
 # Install packages
 RUN yum update -y
 RUN yum install -y cpio python3-pip yum-utils zip unzip less
-RUN yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+RUN amazon-linux-extras install epel
 
 # This had --no-cache-dir, tracing through multiple tickets led to a problem in wheel
 RUN pip3 install -r requirements.txt
