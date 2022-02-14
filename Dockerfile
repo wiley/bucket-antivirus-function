@@ -1,5 +1,7 @@
 FROM amazonlinux:2
 
+ARG clamav_version=0.104.2
+
 # Set up working directories
 RUN mkdir -p /opt/app
 RUN mkdir -p /opt/app/build
@@ -12,7 +14,7 @@ COPY requirements.txt /opt/app/requirements.txt
 
 # Install packages
 RUN yum update -y
-RUN yum install -y cpio python3-pip yum-utils zip unzip less
+RUN yum install -y cpio python3-pip yum-utils zip unzip less wget
 RUN amazon-linux-extras install epel
 
 # This had --no-cache-dir, tracing through multiple tickets led to a problem in wheel
@@ -21,11 +23,9 @@ RUN rm -rf /root/.cache/pip
 
 # Download libraries we need to run in lambda
 WORKDIR /tmp
+RUN wget https://www.clamav.net/downloads/production/clamav-${clamav_version}.linux.x86_64.rpm -O clamav.rpm -U "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:93.0) Gecko/20100101 Firefox/93.0"
+
 RUN yumdownloader -x \*i686 --archlist=x86_64 \
-  clamav \
-  clamav-lib \
-  clamav-scanner-systemd \
-  clamav-update \
   elfutils-libs \
   json-c \
   lz4 \
@@ -35,10 +35,7 @@ RUN yumdownloader -x \*i686 --archlist=x86_64 \
   libtasn1 \
   nettle \
   systemd-libs
-RUN rpm2cpio clamav-0*.rpm | cpio -idmv
-RUN rpm2cpio clamav-lib*.rpm | cpio -idmv
-RUN rpm2cpio clamav-update*.rpm | cpio -idmv
-RUN rpm2cpio clamd-0*.rpm | cpio -idmv
+RUN rpm2cpio clamav.rpm | cpio -idmv
 RUN rpm2cpio elfutils-libs*.rpm | cpio -idmv
 RUN rpm2cpio json-c*.rpm | cpio -idmv
 RUN rpm2cpio lz4*.rpm | cpio -idmv
@@ -50,9 +47,10 @@ RUN rpm2cpio nettle*.rpm | cpio -idmv
 RUN rpm2cpio systemd-libs*.rpm | cpio -idmv
 
 # Copy over the binaries and libraries
-RUN cp -r /tmp/usr/bin/clamdscan \
-       /tmp/usr/sbin/clamd \
-       /tmp/usr/bin/freshclam \
+RUN cp -r /tmp/usr/local/bin/clamdscan \
+       /tmp/usr/local/sbin/clamd \
+       /tmp/usr/local/bin/freshclam \
+       /tmp/usr/local/lib64/* \
        /tmp/usr/lib64/* \
        /opt/app/bin/
 
