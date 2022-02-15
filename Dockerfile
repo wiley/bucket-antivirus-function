@@ -25,26 +25,7 @@ RUN rm -rf /root/.cache/pip
 WORKDIR /tmp
 RUN wget https://www.clamav.net/downloads/production/clamav-${clamav_version}.linux.x86_64.rpm -O clamav.rpm -U "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:93.0) Gecko/20100101 Firefox/93.0"
 
-RUN yumdownloader -x \*i686 --archlist=x86_64 \
-  elfutils-libs \
-  json-c \
-  lz4 \
-  pcre2 \
-  libprelude \
-  gnutls \
-  libtasn1 \
-  nettle \
-  systemd-libs
 RUN rpm2cpio clamav.rpm | cpio -idmv
-RUN rpm2cpio elfutils-libs*.rpm | cpio -idmv
-RUN rpm2cpio json-c*.rpm | cpio -idmv
-RUN rpm2cpio lz4*.rpm | cpio -idmv
-RUN rpm2cpio pcre*.rpm | cpio -idmv
-RUN rpm2cpio libprelude*.rpm | cpio -idmv
-RUN rpm2cpio gnutls*.rpm | cpio -idmv
-RUN rpm2cpio libtasn1*.rpm | cpio -idmv
-RUN rpm2cpio nettle*.rpm | cpio -idmv
-RUN rpm2cpio systemd-libs*.rpm | cpio -idmv
 
 # Copy over the binaries and libraries
 RUN cp -r /tmp/usr/local/bin/clamdscan \
