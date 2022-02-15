@@ -15,7 +15,6 @@ COPY requirements.txt /opt/app/requirements.txt
 # Install packages
 RUN yum update -y
 RUN yum install -y cpio python3-pip yum-utils zip unzip less wget
-RUN amazon-linux-extras install epel
 
 # This had --no-cache-dir, tracing through multiple tickets led to a problem in wheel
 RUN pip3 install -r requirements.txt
@@ -32,7 +31,6 @@ RUN cp -r /tmp/usr/local/bin/clamdscan \
        /tmp/usr/local/sbin/clamd \
        /tmp/usr/local/bin/freshclam \
        /tmp/usr/local/lib64/* \
-       /tmp/usr/lib64/* \
        /opt/app/bin/
 
 RUN echo "DatabaseDirectory /tmp/clamav_defs" > /opt/app/bin/scan.conf
