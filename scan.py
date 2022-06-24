@@ -30,6 +30,7 @@ from common import AV_PROCESS_ORIGINAL_VERSION_ONLY
 from common import AV_SCAN_START_METADATA
 from common import AV_SCAN_START_SNS_ARN
 from common import AV_SIGNATURE_METADATA
+from common import AV_SIGNATURE_OK
 from common import AV_STATUS_CLEAN
 from common import AV_STATUS_INFECTED
 from common import AV_STATUS_METADATA
@@ -189,6 +190,10 @@ def sns_start_scan(sns_client, s3_object, scan_start_sns_arn, timestamp):
 def sns_scan_results(
     sns_client, s3_object, sns_arn, scan_result, scan_signature, timestamp
 ):
+    # hack to disable false-positive https://github.com/Cisco-Talos/clamav/issues/620
+    if scan_result == AV_STATUS_INFECTED and scan_signature == "Archive.Test.Agent2-9953724-0":
+        scan_result = AV_STATUS_CLEAN
+        scan_signature = AV_SIGNATURE_OK
     # Don't publish if scan_result is CLEAN and CLEAN results should not be published
     if scan_result == AV_STATUS_CLEAN and not str_to_bool(AV_STATUS_SNS_PUBLISH_CLEAN):
         return
