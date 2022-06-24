@@ -194,6 +194,7 @@ def sns_scan_results(
     if scan_result == AV_STATUS_INFECTED and scan_signature == "Archive.Test.Agent2-9953724-0":
         scan_result = AV_STATUS_CLEAN
         scan_signature = AV_SIGNATURE_OK
+        print("False positive: %s\n" % (s3_object.key))
     # Don't publish if scan_result is CLEAN and CLEAN results should not be published
     if scan_result == AV_STATUS_CLEAN and not str_to_bool(AV_STATUS_SNS_PUBLISH_CLEAN):
         return
