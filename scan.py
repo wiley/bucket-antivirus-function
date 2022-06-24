@@ -191,7 +191,7 @@ def sns_scan_results(
     sns_client, s3_object, sns_arn, scan_result, scan_signature, timestamp
 ):
     # hack to disable false-positive https://github.com/Cisco-Talos/clamav/issues/620
-    if scan_result == AV_STATUS_INFECTED and scan_signature == "Archive.Test.Agent2-9953724-0":
+    if scan_result == AV_STATUS_INFECTED and scan_signature == "Archive.Test.Agent2-9953724-0 FOUND":
         scan_result = AV_STATUS_CLEAN
         scan_signature = AV_SIGNATURE_OK
         print("False positive: %s\n" % (s3_object.key))
