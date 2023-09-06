@@ -1,6 +1,6 @@
 FROM amazonlinux:2
 
-ARG clamav_version=0.104.2
+ARG clamav_version=1.0.3
 
 # Set up working directories
 RUN mkdir -p /opt/app
