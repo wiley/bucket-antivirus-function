@@ -7,6 +7,7 @@ RUN yum install -y cpio wget
 
 # Set up working directories
 RUN mkdir -p /opt/app/bin/
+RUN mkdir -p /opt/app/python_modules
 
 # Download libraries we need to run in lambda
 WORKDIR /tmp

@@ -2,6 +2,38 @@
 
 Scan new objects added to any s3 bucket using AWS Lambda. [more details in this post](https://engineering.upside.com/s3-antivirus-scanning-with-lambda-and-clamav-7d33f9c5092e)
 
+## Healthengine notes
+
+This was forked from https://github.com/wiley/bucket-antivirus-function
+
+The upstream project hasn't been updated in quite a while and still expects a Python 3.7 environment that AWS has deprecated.
+Our fork has been updated to work with Python 3.9
+
+### SSL CA Certificate
+
+By default the `freshclam` binary is looking for `/etc/ssl/certs/ca-certificates.crt` which does not exist in the AWS Lambda environment.
+Therefore `freshclam` will fail to download virus definition updates since it doesn't trust the SSL certificate presented by the download site.
+
+The `certifi` Python module defined in `requirements.txt` contains a CA certificate bundle.
+The fix is to make sure the Lambda is deployed with the `CURL_CA_BUNDLE` environment variable set to `/var/task/certifi/cacert.pem`
+
+NOTE: Your Lambda ZIP gets unpack in the `/var/task/` directory.
+
+### Improvements
+
+If it turns out that the upstream project is never going to be updated and we need to maintain this fork forever then the following improvements can be made.
+
+- All the hacks that adjust `LD_LIBRARY_PATH` in `clamav.py` should be removed.
+Then the `Dockerfile` should be changed so that the libraries that get unpacked to `/tmp/usr/local/lib/lib*` end up in a
+top-level `/lib` directory in the ZIP file instead of being below `/bin`.
+The AWS Lambda environment includes `/var/task/lib` in its `LD_LIBRARY_PATH`.
+
+- To go beyond Python 3.9 it might be a case of just needing to make sure the modules are `requirements.txt` are updated.
+With the current versions of the modules newer Python versions result in the following error:
+```
+[ERROR] Runtime.ImportModuleError: Unable to import module 'scan': cannot import name 'Iterable' from 'collections' (/var/lang/lib/python3.11/collections/__init__.py)
+```
+
 ## Features
 
 - Easy to install
