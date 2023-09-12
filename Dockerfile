@@ -10,15 +10,15 @@ RUN mkdir -p /opt/app/bin/
 
 # Download libraries we need to run in lambda
 WORKDIR /tmp
-RUN wget https://www.clamav.net/downloads/production/clamav-${clamav_version}.linux.x86_64.rpm -O clamav.rpm -U "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:93.0) Gecko/20100101 Firefox/93.0" --no-verbose
+RUN wget https://www.clamav.net/downloads/production/clamav-${clamav_version}.linux.x86_64.deb -O clamav.deb -U "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:93.0) Gecko/20100101 Firefox/93.0" --no-verbose
 
-RUN rpm2cpio clamav.rpm | cpio -idmv
+RUN dpkg-deb -R clamav.deb /tmp
 
 # Copy over the binaries and libraries
 RUN cp -r /tmp/usr/local/bin/clamdscan \
        /tmp/usr/local/sbin/clamd \
        /tmp/usr/local/bin/freshclam \
-       /tmp/usr/local/lib64/* \
+       /tmp/usr/local/lib/lib* \
        /opt/app/bin/
 
 RUN echo "DatabaseDirectory /tmp/clamav_defs" > /opt/app/bin/scan.conf
