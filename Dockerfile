@@ -47,9 +47,9 @@ RUN echo "CompressLocalDatabase yes" >> /opt/app/bin/freshclam.conf
 WORKDIR /opt/app
 RUN zip -r9 --exclude="*test*" /opt/app/build/lambda.zip *.py bin
 
-WORKDIR /usr/local/lib/python3.7/site-packages
+WORKDIR /usr/local/lib/python3.9/site-packages
 RUN zip -r9 /opt/app/build/lambda.zip *
-WORKDIR /usr/local/lib64/python3.7/site-packages
+WORKDIR /usr/local/lib64/python3.9/site-packages
 RUN zip -r9 /opt/app/build/lambda.zip *
 
 WORKDIR /opt/app
