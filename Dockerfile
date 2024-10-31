@@ -1,24 +1,12 @@
-FROM amazonlinux:2
+FROM amazonlinux:2 as clamav
 
 ARG clamav_version=1.0.3
 
-# Set up working directories
-RUN mkdir -p /opt/app
-RUN mkdir -p /opt/app/build
-RUN mkdir -p /opt/app/bin/
-
-# Copy in the lambda source
-WORKDIR /opt/app
-COPY ./*.py /opt/app/
-COPY requirements.txt /opt/app/requirements.txt
-
-# Install packages
 RUN yum update -y
-RUN yum install -y cpio python3-pip yum-utils zip unzip less wget
+RUN yum install -y cpio wget
 
-# This had --no-cache-dir, tracing through multiple tickets led to a problem in wheel
-RUN pip3 install -r requirements.txt
-RUN rm -rf /root/.cache/pip
+# Set up working directories
+RUN mkdir -p /opt/app/bin/
 
 # Download libraries we need to run in lambda
 WORKDIR /tmp
@@ -43,13 +31,40 @@ RUN echo "FixStaleSocket yes" >> /opt/app/bin/scan.conf
 RUN echo "DatabaseMirror database.clamav.net" > /opt/app/bin/freshclam.conf
 RUN echo "CompressLocalDatabase yes" >> /opt/app/bin/freshclam.conf
 
+FROM amazonlinux:2 as lambda
+
+ARG dist=/tmp/av
+ARG python_version=3.9
+ARG python=python$python_version
+
+# Install packages
+RUN yum update -y
+RUN yum install -y $python python3-pip yum-utils less
+
+# Copy in the lambda source
+RUN mkdir -p $dist
+COPY --exclude="*test*.py" ./*.py $dist
+COPY requirements.txt $dist/requirements.txt
+
+# This had --no-cache-dir, tracing through multiple tickets led to a problem in wheel
+WORKDIR $dist
+RUN pip3 install -r requirements.txt
+RUN rm -rf /root/.cache/pip
+
+COPY /usr/local/lib/$python/site-packages $dist
+COPY /usr/local/lib64/$python/site-packages $dist
+
+FROM amazonlinux:2
+
+# Install packages
+RUN yum update -y
+RUN yum install -y zip
+
+COPY --from=clamav /opt/app/bin /opt/app/bin
+COPY --from=lambda /tmp/av /opt/app
+
 # Create the zip file
 WORKDIR /opt/app
-RUN zip -r9 --exclude="*test*" /opt/app/build/lambda.zip *.py bin
-
-WORKDIR /usr/local/lib/python3.9/site-packages
-RUN zip -r9 /opt/app/build/lambda.zip *
-WORKDIR /usr/local/lib64/python3.9/site-packages
-RUN zip -r9 /opt/app/build/lambda.zip *
+RUN zip -r9 /opt/app/build/lambda.zip *.py bin
 
 WORKDIR /opt/app
