@@ -43,7 +43,7 @@ RUN yum install -y $python python3-pip yum-utils less
 
 # Copy in the lambda source
 RUN mkdir -p $dist
-COPY --exclude="*test*.py" ./*.py $dist
+COPY --exclude=*test*.py ./*.py $dist
 COPY requirements.txt $dist/requirements.txt
 
 # This had --no-cache-dir, tracing through multiple tickets led to a problem in wheel
