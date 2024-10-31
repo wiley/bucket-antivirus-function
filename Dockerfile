@@ -1,4 +1,4 @@
-FROM amazonlinux:2 as clamav
+FROM amazonlinux:2023 as clamav
 
 ARG clamav_version=1.0.3
 
@@ -31,15 +31,13 @@ RUN echo "FixStaleSocket yes" >> /opt/app/bin/scan.conf
 RUN echo "DatabaseMirror database.clamav.net" > /opt/app/bin/freshclam.conf
 RUN echo "CompressLocalDatabase yes" >> /opt/app/bin/freshclam.conf
 
-FROM amazonlinux:2 as lambda
+FROM amazonlinux:2023 as lambda
 
 ARG dist=/tmp/av
-ARG python_version=3.9
-ARG python=python$python_version
 
 # Install packages
 RUN yum update -y
-RUN yum install -y $python python3-pip yum-utils less
+RUN yum install -y python3-pip yum-utils less
 
 # Copy in the lambda source
 RUN mkdir -p $dist
@@ -51,8 +49,8 @@ WORKDIR $dist
 RUN pip3 install -r requirements.txt
 RUN rm -rf /root/.cache/pip
 
-COPY /usr/local/lib/$python/site-packages $dist
-COPY /usr/local/lib64/$python/site-packages $dist
+COPY /usr/local/lib/python3/site-packages $dist
+COPY /usr/local/lib64/python3/site-packages $dist
 
 FROM amazonlinux:2
 
