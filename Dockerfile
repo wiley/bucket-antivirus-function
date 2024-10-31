@@ -47,9 +47,13 @@ COPY requirements.txt $dist/requirements.txt
 # This had --no-cache-dir, tracing through multiple tickets led to a problem in wheel
 WORKDIR $dist
 RUN pip3 install -r requirements.txt
+RUN ls -la /usr/lib64/python3.9/site-packages
+RUN ls -la /usr/lib/python3.9/site-packages
+RUN ls -la /usr/local/lib64/python3.9/site-packages
+RUN ls -la /usr/local/lib/python3.9/site-packages
 
-COPY /usr/local/lib64/python3.9/site-packages/ $dist/
 COPY /usr/local/lib/python3.9/site-packages/ $dist/
+COPY /usr/local/lib64/python3.9/site-packages/ $dist/
 
 FROM artifactory.aws.wiley.com/docker/amazonlinux:2023
 
