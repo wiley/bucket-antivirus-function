@@ -1,6 +1,6 @@
 FROM amazonlinux:2023 as clamav
 
-ARG clamav_version=1.0.3
+ARG clamav_version=1.4.1
 
 RUN yum update -y
 RUN yum install -y cpio wget
@@ -47,10 +47,9 @@ COPY requirements.txt $dist/requirements.txt
 # This had --no-cache-dir, tracing through multiple tickets led to a problem in wheel
 WORKDIR $dist
 RUN pip3 install -r requirements.txt
-RUN rm -rf /root/.cache/pip
 
-COPY /usr/local/lib/python3/site-packages $dist
-COPY /usr/local/lib64/python3/site-packages $dist
+COPY /usr/local/lib/python3.9/site-packages $dist
+COPY /usr/local/lib64/python3.9/site-packages $dist
 
 FROM amazonlinux:2
 
