@@ -1,4 +1,4 @@
-FROM amazonlinux:2023 as clamav
+FROM artifactory.aws.wiley.com/docker/amazonlinux:2023 as clamav
 
 ARG clamav_version=1.4.1
 
@@ -31,7 +31,7 @@ RUN echo "FixStaleSocket yes" >> /opt/app/bin/scan.conf
 RUN echo "DatabaseMirror database.clamav.net" > /opt/app/bin/freshclam.conf
 RUN echo "CompressLocalDatabase yes" >> /opt/app/bin/freshclam.conf
 
-FROM amazonlinux:2023 as lambda
+FROM artifactory.aws.wiley.com/docker/amazonlinux:2023 as lambda
 
 ARG dist=/tmp/av
 
@@ -51,7 +51,7 @@ RUN pip3 install -r requirements.txt
 COPY /usr/local/lib64/python3.9/site-packages $dist
 #COPY /usr/local/lib/python3.9/site-packages $dist
 
-FROM amazonlinux:2023
+FROM artifactory.aws.wiley.com/docker/amazonlinux:2023
 
 # Install packages
 RUN yum update -y
