@@ -43,7 +43,7 @@ RUN yum install -y $python python3-pip yum-utils less
 
 # Copy in the lambda source
 RUN mkdir -p $dist
-COPY --exclude=*test*.py ./*.py $dist
+COPY ./*.py $dist
 COPY requirements.txt $dist/requirements.txt
 
 # This had --no-cache-dir, tracing through multiple tickets led to a problem in wheel
@@ -65,6 +65,6 @@ COPY --from=lambda /tmp/av /opt/app
 
 # Create the zip file
 WORKDIR /opt/app
-RUN zip -r9 /opt/app/build/lambda.zip *.py bin
+RUN zip -r9 --exclude="*test*" /opt/app/build/lambda.zip *.py bin
 
 WORKDIR /opt/app
