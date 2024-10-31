@@ -48,8 +48,8 @@ COPY requirements.txt $dist/requirements.txt
 WORKDIR $dist
 RUN pip3 install -r requirements.txt
 
-COPY /usr/local/lib64/python3.9/site-packages $dist
-#COPY /usr/local/lib/python3.9/site-packages $dist
+COPY /usr/local/lib64/python3.9/site-packages/ $dist/
+COPY /usr/local/lib/python3.9/site-packages/ $dist/
 
 FROM artifactory.aws.wiley.com/docker/amazonlinux:2023
 
