@@ -35,14 +35,13 @@ FROM artifactory.aws.wiley.com/docker/amazonlinux:2023
 
 ARG dist=/opt/app
 
-COPY --from=clamav /opt/app/bin /opt/app/bin
-
 # Install packages
 RUN yum update -y
 RUN yum install -y python3-pip yum-utils less zip
 
 # Copy in the lambda source
 RUN mkdir -p $dist/build
+COPY --from=clamav /opt/app/bin /opt/app/bin
 COPY ./*.py $dist/
 COPY requirements.txt $dist/requirements.txt
 
