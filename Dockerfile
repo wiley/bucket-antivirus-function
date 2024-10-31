@@ -42,7 +42,7 @@ RUN yum update -y
 RUN yum install -y python3-pip yum-utils less zip
 
 # Copy in the lambda source
-RUN mkdir -p $dist
+RUN mkdir -p $dist/build
 COPY ./*.py $dist/
 COPY requirements.txt $dist/requirements.txt
 
