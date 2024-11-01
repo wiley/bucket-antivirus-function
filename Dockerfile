@@ -56,7 +56,5 @@ RUN zip -r9 --exclude="*test*" $dist/build/lambda.zip *.py bin
 
 WORKDIR /usr/local/lib/python3.12/site-packages
 RUN zip -r9 $dist/build/lambda.zip *
-WORKDIR /usr/local/lib64/python3.12/site-packages
-RUN zip -r9 $dist/build/lambda.zip *
 
 WORKDIR $dist
