@@ -6,4 +6,3 @@ requests
 simplejson
 urllib3
 psutil
-mypy
