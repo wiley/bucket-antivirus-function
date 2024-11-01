@@ -31,12 +31,14 @@ RUN echo "FixStaleSocket yes" >> /opt/app/bin/scan.conf
 RUN echo "DatabaseMirror database.clamav.net" > /opt/app/bin/freshclam.conf
 RUN echo "CompressLocalDatabase yes" >> /opt/app/bin/freshclam.conf
 
-FROM artifactory.aws.wiley.com/docker/python:3.12-alpine3.20
+FROM artifactory.aws.wiley.com/docker/python:3.12
 
 ARG dist=/opt/app
 
 # Install packages
-RUN apk add --no-cache zip
+RUN apt-get update; \
+    apt-get install -y --no-install-recommends \
+      zip
 
 # Copy in the lambda source
 RUN mkdir -p $dist/build
