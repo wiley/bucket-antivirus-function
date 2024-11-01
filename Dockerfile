@@ -1,6 +1,5 @@
 FROM artifactory.aws.wiley.com/docker/amazonlinux:2023 as clamav
 
-# ARG clamav_version=1.4.1
 ARG clamav_version=1.0.3
 
 RUN yum update -y
