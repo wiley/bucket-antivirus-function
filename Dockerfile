@@ -1,6 +1,6 @@
 FROM artifactory.aws.wiley.com/docker/amazonlinux:2023 as clamav
 
-ARG clamav_version=1.0.3
+ARG clamav_version=1.4.1
 
 RUN yum update -y
 RUN yum install -y cpio wget
@@ -31,13 +31,12 @@ RUN echo "FixStaleSocket yes" >> /opt/app/bin/scan.conf
 RUN echo "DatabaseMirror database.clamav.net" > /opt/app/bin/freshclam.conf
 RUN echo "CompressLocalDatabase yes" >> /opt/app/bin/freshclam.conf
 
-FROM artifactory.aws.wiley.com/docker/amazonlinux:2023
+FROM artifactory.aws.wiley.com/docker/python:3.12
 
 ARG dist=/opt/app
 
 # Install packages
-RUN yum update -y
-RUN yum install -y python3-pip yum-utils less zip
+RUN apk add --no-cache zip
 
 # Copy in the lambda source
 RUN mkdir -p $dist/build
@@ -53,9 +52,9 @@ RUN rm -rf /root/.cache/pip
 # Create the zip file
 RUN zip -r9 --exclude="*test*" $dist/build/lambda.zip *.py bin
 
-WORKDIR /usr/local/lib/python3.9/site-packages
+WORKDIR /usr/local/lib/python3.12/site-packages
 RUN zip -r9 $dist/build/lambda.zip *
-WORKDIR /usr/local/lib64/python3.9/site-packages
+WORKDIR /usr/local/lib64/python3.12/site-packages
 RUN zip -r9 $dist/build/lambda.zip *
 
 WORKDIR $dist
