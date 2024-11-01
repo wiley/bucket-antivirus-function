@@ -31,7 +31,7 @@ RUN echo "FixStaleSocket yes" >> /opt/app/bin/scan.conf
 RUN echo "DatabaseMirror database.clamav.net" > /opt/app/bin/freshclam.conf
 RUN echo "CompressLocalDatabase yes" >> /opt/app/bin/freshclam.conf
 
-FROM artifactory.aws.wiley.com/docker/python:3.12
+FROM artifactory.aws.wiley.com/docker/python:3.12-alpine3.20
 
 ARG dist=/opt/app
 
