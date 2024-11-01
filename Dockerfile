@@ -48,7 +48,7 @@ COPY requirements.txt $dist/requirements.txt
 
 # This had --no-cache-dir, tracing through multiple tickets led to a problem in wheel
 WORKDIR $dist
-RUN pip3 install -r requirements.txt
+RUN pip install -r requirements.txt
 RUN rm -rf /root/.cache/pip
 
 # Create the zip file
