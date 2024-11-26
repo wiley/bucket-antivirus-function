@@ -64,7 +64,7 @@ class TestScan(unittest.TestCase):
         sns_event = {"Records": [{"Sns": {"Message": json.dumps(event)}}]}
         s3_obj = event_object(sns_event, event_source="sns")
         expected_s3_object = self.s3.Object(self.s3_bucket_name, self.s3_key_name)
-        self.assertEquals(s3_obj, expected_s3_object)
+        self.assertEqual(s3_obj, expected_s3_object)
 
     def test_s3_event_object(self):
         event = {
@@ -79,25 +79,25 @@ class TestScan(unittest.TestCase):
         }
         s3_obj = event_object(event)
         expected_s3_object = self.s3.Object(self.s3_bucket_name, self.s3_key_name)
-        self.assertEquals(s3_obj, expected_s3_object)
+        self.assertEqual(s3_obj, expected_s3_object)
 
     def test_s3_event_object_missing_bucket(self):
         event = {"Records": [{"s3": {"object": {"key": self.s3_key_name}}}]}
         with self.assertRaises(Exception) as cm:
             event_object(event)
-            self.assertEquals(cm.exception.message, "No bucket found in event!")
+            self.assertEqual(cm.exception.message, "No bucket found in event!")
 
     def test_s3_event_object_missing_key(self):
         event = {"Records": [{"s3": {"bucket": {"name": self.s3_bucket_name}}}]}
         with self.assertRaises(Exception) as cm:
             event_object(event)
-            self.assertEquals(cm.exception.message, "No key found in event!")
+            self.assertEqual(cm.exception.message, "No key found in event!")
 
     def test_s3_event_object_bucket_key_missing(self):
         event = {"Records": [{"s3": {"bucket": {}, "object": {}}}]}
         with self.assertRaises(Exception) as cm:
             event_object(event)
-            self.assertEquals(
+            self.assertEqual(
                 cm.exception.message,
                 "Unable to retrieve object from event.\n{}".format(event),
             )
@@ -106,7 +106,7 @@ class TestScan(unittest.TestCase):
         event = {"Records": []}
         with self.assertRaises(Exception) as cm:
             event_object(event)
-            self.assertEquals(cm.exception.message, "No records found in event!")
+            self.assertEqual(cm.exception.message, "No records found in event!")
 
     def test_verify_s3_object_version(self):
         s3_obj = self.s3.Object(self.s3_bucket_name, self.s3_key_name)
@@ -165,7 +165,7 @@ class TestScan(unittest.TestCase):
         with self.assertRaises(Exception) as cm:
             with s3_stubber_resource:
                 verify_s3_object_version(self.s3, s3_obj)
-            self.assertEquals(
+            self.assertEqual(
                 cm.exception.message,
                 "Object versioning is not enabled in bucket {}".format(
                     self.s3_bucket_name
@@ -220,7 +220,7 @@ class TestScan(unittest.TestCase):
         with self.assertRaises(Exception) as cm:
             with s3_stubber_resource:
                 verify_s3_object_version(self.s3, s3_obj)
-            self.assertEquals(
+            self.assertEqual(
                 cm.exception.message,
                 "Detected multiple object versions in {}.{}, aborting processing".format(
                     self.s3_bucket_name, self.s3_key_name
@@ -284,7 +284,7 @@ class TestScan(unittest.TestCase):
             )
 
             expected_file_path = "/mnt/test_bucket/test_key"
-            self.assertEquals(file_path, expected_file_path)
+            self.assertEqual(file_path, expected_file_path)
 
         with s3_stubber_resource:
             file_path = get_local_path_internal(
@@ -292,13 +292,13 @@ class TestScan(unittest.TestCase):
             )
 
             expected_file_path = "/tmp/test_bucket/test_key"
-            self.assertEquals(file_path, expected_file_path)
+            self.assertEqual(file_path, expected_file_path)
 
         with s3_stubber_resource:
             file_path = get_local_path_internal(s3_obj, "/tmp", None, None)
 
             expected_file_path = "/tmp/test_bucket/test_key"
-            self.assertEquals(file_path, expected_file_path)
+            self.assertEqual(file_path, expected_file_path)
 
     def test_set_av_metadata(self):
         scan_result = "CLEAN"
@@ -455,7 +455,7 @@ class TestScan(unittest.TestCase):
             with s3_stubber:
                 s3_obj = self.s3.Object(self.s3_bucket_name, self.s3_key_name)
                 delete_s3_object(s3_obj)
-            self.assertEquals(
+            self.assertEqual(
                 cm.exception.message,
                 "Failed to delete infected file: {}.{}".format(
                     self.s3_bucket_name, self.s3_key_name

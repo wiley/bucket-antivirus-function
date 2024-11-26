@@ -19,12 +19,11 @@ import os
 import signal
 import psutil
 from urllib.parse import unquote_plus
-from distutils.util import strtobool
+from common import strtobool
 
 import boto3
 
 import clamav
-import metrics
 from common import AV_DELETE_INFECTED_FILES
 from common import AV_PROCESS_ORIGINAL_VERSION_ONLY
 from common import AV_SCAN_START_METADATA
@@ -296,9 +295,6 @@ def lambda_handler(event, context):
                 result_time,
             )
 
-        metrics.send(
-            env=ENV, bucket=s3_object.bucket_name, key=s3_object.key, status=scan_result
-        )
         if str_to_bool(AV_DELETE_INFECTED_FILES) and scan_result == AV_STATUS_INFECTED:
             delete_s3_object(s3_object)
         stop_scan_time = get_timestamp()

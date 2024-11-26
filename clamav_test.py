@@ -132,7 +132,7 @@ class TestClamAV(unittest.TestCase):
             md5_hash = md5_from_s3_tags(
                 self.s3_client, self.s3_bucket_name, self.s3_key_name
             )
-            self.assertEquals("", md5_hash)
+            self.assertEqual("", md5_hash)
 
     def test_md5_from_s3_tags_has_md5(self):
         expected_md5_hash = "d41d8cd98f00b204e9800998ecf8427e"
@@ -153,7 +153,7 @@ class TestClamAV(unittest.TestCase):
             md5_hash = md5_from_s3_tags(
                 self.s3_client, self.s3_bucket_name, self.s3_key_name
             )
-            self.assertEquals(expected_md5_hash, md5_hash)
+            self.assertEqual(expected_md5_hash, md5_hash)
 
     def test_time_from_s3(self):
 
@@ -172,7 +172,7 @@ class TestClamAV(unittest.TestCase):
             s3_time = time_from_s3(
                 self.s3_client, self.s3_bucket_name, self.s3_key_name
             )
-            self.assertEquals(expected_s3_time, s3_time)
+            self.assertEqual(expected_s3_time, s3_time)
 
     @mock.patch("clamav.md5_from_file")
     @mock.patch("common.os.path.exists")
@@ -234,7 +234,7 @@ class TestClamAV(unittest.TestCase):
             to_download = update_defs_from_s3(
                 self.s3_client, self.s3_bucket_name, AV_DEFINITION_S3_PREFIX
             )
-            self.assertEquals(expected_to_download, to_download)
+            self.assertEqual(expected_to_download, to_download)
 
     @mock.patch("clamav.md5_from_file")
     @mock.patch("common.os.path.exists")
@@ -283,7 +283,7 @@ class TestClamAV(unittest.TestCase):
             to_download = update_defs_from_s3(
                 self.s3_client, self.s3_bucket_name, AV_DEFINITION_S3_PREFIX
             )
-            self.assertEquals(expected_to_download, to_download)
+            self.assertEqual(expected_to_download, to_download)
 
     @mock.patch("clamav.md5_from_file")
     @mock.patch("common.os.path.exists")
@@ -349,4 +349,4 @@ class TestClamAV(unittest.TestCase):
             to_download = update_defs_from_s3(
                 self.s3_client, self.s3_bucket_name, AV_DEFINITION_S3_PREFIX
             )
-            self.assertEquals(expected_to_download, to_download)
+            self.assertEqual(expected_to_download, to_download)

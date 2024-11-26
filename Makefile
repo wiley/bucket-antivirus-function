@@ -51,7 +51,7 @@ pre_commit_tests: ## Run pre-commit tests
 
 .PHONY: test
 test: clean  ## Run python tests
-	nosetests
+	pytest
 
 .PHONY: coverage
 coverage: clean  ## Run python tests with coverage
