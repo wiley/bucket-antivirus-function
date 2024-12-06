@@ -45,12 +45,6 @@ from common import CLAMD_SOCKET
 RE_SEARCH_DIR = r"SEARCH_DIR\(\"=([A-z0-9\/\-_]*)\"\)"
 
 
-def current_library_search_path():
-    ld_verbose = subprocess.check_output(["ld", "--verbose"]).decode("utf-8")
-    rd_ld = re.compile(RE_SEARCH_DIR)
-    return rd_ld.findall(ld_verbose)
-
-
 def update_defs_from_s3(s3_client, bucket, prefix):
     create_dir(AV_DEFINITION_PATH)
     to_download = {}
@@ -115,10 +109,7 @@ def update_defs_from_freshclam(path, library_path=""):
     create_dir(path)
     fc_env = os.environ.copy()
     if library_path:
-        fc_env["LD_LIBRARY_PATH"] = "%s:%s" % (
-            ":".join(current_library_search_path()),
-            CLAMAVLIB_PATH,
-        )
+        fc_env["LD_LIBRARY_PATH"] = library_path
     print("Starting freshclam with defs in %s." % path)
     fc_proc = subprocess.Popen(
         [
