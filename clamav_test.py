@@ -24,7 +24,6 @@ import botocore.session
 from botocore.stub import Stubber
 import mock
 
-from clamav import RE_SEARCH_DIR
 from clamav import scan_output_to_json
 from clamav import md5_from_s3_tags
 from clamav import time_from_s3

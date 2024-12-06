@@ -42,9 +42,6 @@ from common import create_dir
 from common import CLAMD_SOCKET
 
 
-RE_SEARCH_DIR = r"SEARCH_DIR\(\"=([A-z0-9\/\-_]*)\"\)"
-
-
 def update_defs_from_s3(s3_client, bucket, prefix):
     create_dir(AV_DEFINITION_PATH)
     to_download = {}
