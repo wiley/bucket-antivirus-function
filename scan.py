@@ -53,16 +53,16 @@ kafka_producer = None
 def get_kafka_producer():
     """Get or create a Kafka producer instance that persists across invocations."""
     global kafka_producer
-    
+
     # Return None if bootstrap servers not configured
     if not AV_KAFKA_BOOTSTRAP_SERVERS:
         return None
-    
+
     # Create producer if it doesn't exist
     if kafka_producer is None:
         try:
             kafka_producer = KafkaProducer(
-                bootstrap_servers=AV_KAFKA_BOOTSTRAP_SERVERS.split(','),
+                bootstrap_servers=[AV_KAFKA_BOOTSTRAP_SERVERS.split(',')],
                 value_serializer=lambda v: json.dumps(v).encode('utf-8'),
                 # Add some sensible defaults for Lambda environment
                 request_timeout_ms=30000,
@@ -74,7 +74,7 @@ def get_kafka_producer():
         except Exception as e:
             print(f"Failed to create Kafka producer: {e}")
             return None
-    
+
     # Test if the existing producer is still healthy
     try:
         # This is a quick way to test if the connection is still valid
@@ -278,7 +278,7 @@ def lambda_handler(event, context):
 
     s3 = boto3.resource("s3")
     s3_client = boto3.client("s3")
-    
+
     # Get the persistent Kafka producer
     kafka_producer = get_kafka_producer()
 
@@ -346,7 +346,7 @@ def lambda_handler(event, context):
             os.remove(file_path)
         except OSError:
             pass
-        
+
         # Don't close Kafka producer - let it persist for future invocations
         # It will be reused by subsequent Lambda invocations for better performance
 
