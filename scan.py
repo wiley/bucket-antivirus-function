@@ -62,7 +62,7 @@ def get_kafka_producer():
     if kafka_producer is None:
         try:
             kafka_producer = KafkaProducer(
-                bootstrap_servers=[AV_KAFKA_BOOTSTRAP_SERVERS.split(',')],
+                bootstrap_servers=AV_KAFKA_BOOTSTRAP_SERVERS.split(','),
                 value_serializer=lambda v: json.dumps(v).encode('utf-8'),
                 # Add some sensible defaults for Lambda environment
                 request_timeout_ms=30000,
