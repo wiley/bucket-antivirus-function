@@ -19,6 +19,7 @@ import os
 import signal
 import psutil
 import traceback
+import uuid
 from urllib.parse import unquote_plus
 from common import strtobool
 from kafka import KafkaProducer
@@ -233,8 +234,12 @@ def kafka_scan_results(
         AV_STATUS_PUBLISH_INFECTED
     ):
         return
+    message_key = str(uuid.uuid4()).encode('utf-8')
+    headers = [
+        ('bucket', b's3_object.bucket_name'),
+        ('transactionId', b'message_key')
+    ]
     message = {
-        "bucket": s3_object.bucket_name,
         "key": s3_object.key,
         "version": s3_object.version_id,
         AV_SIGNATURE_METADATA: scan_signature,
@@ -242,7 +247,7 @@ def kafka_scan_results(
         AV_TIMESTAMP_METADATA: get_timestamp(),
     }
     try:
-        producer.send(AV_STATUS_TOPIC, message)
+        producer.send(AV_STATUS_TOPIC, message_key, message, headers=headers)
         producer.flush()
     except KafkaError as e:
         print(f"Failed to send Kafka scan results message: {e}")
