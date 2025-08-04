@@ -78,21 +78,7 @@ def get_kafka_producer():
             print(f"Failed to create Kafka producer: {e}")
             traceback.print_exc()
             return None
-
-    # Test if the existing producer is still healthy
-    try:
-        # This is a quick way to test if the connection is still valid
-        # partitions_for() will fail fast if connection is broken
-        if kafka_producer.bootstrap_connected():
-            return kafka_producer
-        else:
-            print("Kafka producer connection lost, recreating...")
-            kafka_producer = None
-            return get_kafka_producer()  # Recursive call to recreate
-    except Exception as e:
-        print(f"Kafka producer health check failed: {e}, recreating...")
-        kafka_producer = None
-        return get_kafka_producer()  # Recursive call to recreate
+    return kafka_producer
 
 
 def event_object(event, event_source="s3"):
