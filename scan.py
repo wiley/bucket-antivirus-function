@@ -18,6 +18,7 @@ import json
 import os
 import signal
 import psutil
+import traceback
 from urllib.parse import unquote_plus
 from common import strtobool
 from kafka import KafkaProducer
@@ -73,6 +74,7 @@ def get_kafka_producer():
             print("Created new Kafka producer")
         except Exception as e:
             print(f"Failed to create Kafka producer: {e}")
+            traceback.print_exc()
             return None
 
     # Test if the existing producer is still healthy
