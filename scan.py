@@ -64,6 +64,8 @@ def get_kafka_producer():
         try:
             kafka_producer = KafkaProducer(
                 bootstrap_servers=AV_KAFKA_BOOTSTRAP_SERVERS.split(','),
+                security_protocol='PLAINTEXT',
+                api_version = (3, 5, 1),
                 value_serializer=lambda v: json.dumps(v).encode('utf-8'),
                 # Add some sensible defaults for Lambda environment
                 request_timeout_ms=30000,
