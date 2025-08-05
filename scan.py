@@ -236,8 +236,8 @@ def kafka_scan_results(
         return
     message_key = str(uuid.uuid4()).encode('utf-8')
     headers = [
-        ('bucket', b's3_object.bucket_name'),
-        ('transactionId', b'message_key')
+        (b'bucket', b's3_object.bucket_name'),
+        (b'transactionId', message_key)
     ]
     message = {
         "key": s3_object.key,
@@ -247,7 +247,7 @@ def kafka_scan_results(
         AV_TIMESTAMP_METADATA: get_timestamp(),
     }
     try:
-        producer.send(AV_STATUS_TOPIC, message_key, message, headers=headers)
+        producer.send(AV_STATUS_TOPIC, key=message_key, value=message, headers=headers)
         producer.flush()
     except KafkaError as e:
         print(f"Failed to send Kafka scan results message: {e}")
