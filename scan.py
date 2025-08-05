@@ -20,6 +20,7 @@ import signal
 import psutil
 import traceback
 import uuid
+import logging
 from urllib.parse import unquote_plus
 from common import strtobool
 from kafka import KafkaProducer
@@ -51,6 +52,10 @@ clamd_pid = None
 # Global Kafka producer - persists across Lambda invocations
 kafka_producer = None
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s - %(message)s'
+)
 
 def get_kafka_producer():
     """Get or create a Kafka producer instance that persists across invocations."""
@@ -74,9 +79,9 @@ def get_kafka_producer():
                 max_in_flight_requests_per_connection=1,
                 acks='all'
             )
-            print("Created new Kafka producer")
+            logging.info("Created new Kafka producer")
         except Exception as e:
-            print(f"Failed to create Kafka producer: {e}")
+            logging.error(f"Failed to create Kafka producer: {e}")
             traceback.print_exc()
             return None
     return kafka_producer
@@ -220,7 +225,7 @@ def kafka_start_scan(producer, s3_object, scan_start_topic, timestamp):
         producer.send(scan_start_topic, message)
         producer.flush()
     except KafkaError as e:
-        print(f"Failed to send Kafka start scan message: {e}")
+        logging.error(f"Failed to send Kafka start scan message: {e}")
 
 
 def kafka_scan_results(
@@ -236,8 +241,8 @@ def kafka_scan_results(
         return
     message_key = str(uuid.uuid4()).encode('utf-8')
     headers = [
-        (b'bucket', b's3_object.bucket_name'),
-        (b'transactionId', message_key)
+        ('bucket', s3_object.bucket_name.encode('utf-8')),
+        ('transactionId', message_key)
     ]
     message = {
         "key": s3_object.key,
@@ -247,10 +252,11 @@ def kafka_scan_results(
         AV_TIMESTAMP_METADATA: get_timestamp(),
     }
     try:
+        logging.info(f"Sending message to topic {AV_STATUS_TOPIC} with key={message_key} and headers={headers} and value= {message}")
         producer.send(AV_STATUS_TOPIC, key=message_key, value=message, headers=headers)
         producer.flush()
     except KafkaError as e:
-        print(f"Failed to send Kafka scan results message: {e}")
+        logging.error(f"Failed to send Kafka scan results message: {e}")
 
 
 def kill_process_by_pid(pid):
