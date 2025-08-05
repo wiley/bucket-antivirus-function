@@ -52,10 +52,18 @@ clamd_pid = None
 # Global Kafka producer - persists across Lambda invocations
 kafka_producer = None
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(levelname)s - %(message)s'
-)
+logger = logging.getLogger()
+
+for handler in logger.handlers:
+    logger.removeHandler(handler)
+
+stream_handler = logging.StreamHandler()
+
+formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
+stream_handler.setFormatter(formatter)
+
+logger.addHandler(stream_handler)
+logger.setLevel(logging.INFO)
 
 def get_kafka_producer():
     """Get or create a Kafka producer instance that persists across invocations."""
