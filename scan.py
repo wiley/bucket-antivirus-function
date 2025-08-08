@@ -38,7 +38,7 @@ from common import AV_SIGNATURE_METADATA
 from common import AV_STATUS_CLEAN
 from common import AV_STATUS_INFECTED
 from common import AV_STATUS_METADATA
-from common import AV_STATUS_TOPIC
+from common import AV_KAFKA_TOPIC_SCAN_RESPONSE
 from common import AV_STATUS_PUBLISH_CLEAN
 from common import AV_STATUS_PUBLISH_INFECTED
 from common import AV_TIMESTAMP_METADATA
@@ -260,8 +260,8 @@ def kafka_scan_results(
         AV_TIMESTAMP_METADATA: get_timestamp(),
     }
     try:
-        logging.info(f"Sending message to topic {AV_STATUS_TOPIC} with key={message_key} and headers={headers} and value= {message}")
-        producer.send(AV_STATUS_TOPIC, key=message_key, value=message, headers=headers)
+        logging.info(f"Sending message to topic {AV_KAFKA_TOPIC_SCAN_RESPONSE} with key={message_key} and headers={headers} and value= {message}")
+        producer.send(AV_KAFKA_TOPIC_SCAN_RESPONSE, key=message_key, value=message, headers=headers)
         producer.flush()
     except KafkaError as e:
         logging.error(f"Failed to send Kafka scan results message: {e}")
@@ -336,7 +336,7 @@ def lambda_handler(event, context):
         set_av_tags(s3_client, s3_object, scan_result, scan_signature, result_time)
 
         # Publish the scan results
-        if kafka_producer and AV_STATUS_TOPIC not in [None, ""]:
+        if kafka_producer and AV_KAFKA_TOPIC_SCAN_RESPONSE not in [None, ""]:
             kafka_scan_results(
                 kafka_producer,
                 s3_object,
