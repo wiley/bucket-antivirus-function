@@ -12,14 +12,14 @@ The following environment variables have been updated in `common.py`:
 
 **Old SNS Configuration:**
 - `AV_SCAN_START_SNS_ARN` → `AV_SCAN_START_TOPIC`
-- `AV_STATUS_SNS_ARN` → `AV_KAFKA_TOPIC_SCAN_RESPONSE`
+- `AV_STATUS_SNS_ARN` → `REX_KAFKA_TOPIC_AVSCAN_RESPONSE`
 - `AV_STATUS_SNS_PUBLISH_CLEAN` → `AV_STATUS_PUBLISH_CLEAN`
 - `AV_STATUS_SNS_PUBLISH_INFECTED` → `AV_STATUS_PUBLISH_INFECTED`
 
 **New Kafka Configuration:**
-- `AV_KAFKA_BOOTSTRAP_SERVERS` - Comma-separated list of Kafka bootstrap servers
+- `REX_KAFKA_BOOTSTRAP_SERVERS` - Comma-separated list of Kafka bootstrap servers
 - `AV_SCAN_START_TOPIC` - Topic name for scan start notifications
-- `AV_KAFKA_TOPIC_SCAN_RESPONSE` - Topic name for scan results
+- `REX_KAFKA_TOPIC_AVSCAN_RESPONSE` - Topic name for scan results
 
 ### Code Changes
 
@@ -39,11 +39,11 @@ Set the following environment variables:
 
 ```bash
 # Required: Kafka bootstrap servers (comma-separated)
-AV_KAFKA_BOOTSTRAP_SERVERS=kafka-broker1:9092,kafka-broker2:9092,kafka-broker3:9092
+REX_KAFKA_BOOTSTRAP_SERVERS=kafka-broker1:9092,kafka-broker2:9092,kafka-broker3:9092
 
 # Optional: Custom topic names
 AV_SCAN_START_TOPIC=av-scan-start
-AV_KAFKA_TOPIC_SCAN_RESPONSE=av-scan-results
+REX_KAFKA_TOPIC_AVSCAN_RESPONSE=av-scan-results
 
 # Optional: Control what results to publish (defaults to True)
 AV_STATUS_PUBLISH_CLEAN=True
@@ -98,7 +98,7 @@ The Kafka producer is designed to persist across Lambda invocations for optimal 
 The producer includes Lambda-optimized settings:
 ```python
 KafkaProducer(
-    bootstrap_servers=AV_KAFKA_BOOTSTRAP_SERVERS.split(','),
+    bootstrap_servers=REX_KAFKA_BOOTSTRAP_SERVERS.split(','),
     request_timeout_ms=30000,      # 30 second timeout
     retry_backoff_ms=500,          # Fast retry for Lambda environment
     max_in_flight_requests_per_connection=1,  # Ensure message ordering

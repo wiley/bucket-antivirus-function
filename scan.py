@@ -32,13 +32,13 @@ import clamav
 from common import AV_DELETE_INFECTED_FILES
 from common import AV_PROCESS_ORIGINAL_VERSION_ONLY
 from common import AV_SCAN_START_METADATA
-from common import AV_KAFKA_BOOTSTRAP_SERVERS
+from common import REX_KAFKA_BOOTSTRAP_SERVERS
 from common import AV_SCAN_START_TOPIC
 from common import AV_SIGNATURE_METADATA
 from common import AV_STATUS_CLEAN
 from common import AV_STATUS_INFECTED
 from common import AV_STATUS_METADATA
-from common import AV_KAFKA_TOPIC_SCAN_RESPONSE
+from common import REX_KAFKA_TOPIC_AVSCAN_RESPONSE
 from common import AV_STATUS_PUBLISH_CLEAN
 from common import AV_STATUS_PUBLISH_INFECTED
 from common import AV_TIMESTAMP_METADATA
@@ -70,14 +70,14 @@ def get_kafka_producer():
     global kafka_producer
 
     # Return None if bootstrap servers not configured
-    if not AV_KAFKA_BOOTSTRAP_SERVERS:
+    if not REX_KAFKA_BOOTSTRAP_SERVERS:
         return None
 
     # Create producer if it doesn't exist
     if kafka_producer is None:
         try:
             kafka_producer = KafkaProducer(
-                bootstrap_servers=AV_KAFKA_BOOTSTRAP_SERVERS.split(','),
+                bootstrap_servers=REX_KAFKA_BOOTSTRAP_SERVERS.split(','),
                 security_protocol='PLAINTEXT',
                 api_version = (3, 5, 1),
                 value_serializer=lambda v: json.dumps(v).encode('utf-8'),
@@ -260,8 +260,8 @@ def kafka_scan_results(
         AV_TIMESTAMP_METADATA: get_timestamp(),
     }
     try:
-        logging.info(f"Sending message to topic {AV_KAFKA_TOPIC_SCAN_RESPONSE} with key={message_key} and headers={headers} and value= {message}")
-        producer.send(AV_KAFKA_TOPIC_SCAN_RESPONSE, key=message_key, value=message, headers=headers)
+        logging.info(f"Sending message to topic {REX_KAFKA_TOPIC_AVSCAN_RESPONSE} with key={message_key} and headers={headers} and value= {message}")
+        producer.send(REX_KAFKA_TOPIC_AVSCAN_RESPONSE, key=message_key, value=message, headers=headers)
         producer.flush()
     except KafkaError as e:
         logging.error(f"Failed to send Kafka scan results message: {e}")
@@ -336,7 +336,7 @@ def lambda_handler(event, context):
         set_av_tags(s3_client, s3_object, scan_result, scan_signature, result_time)
 
         # Publish the scan results
-        if kafka_producer and AV_KAFKA_TOPIC_SCAN_RESPONSE not in [None, ""]:
+        if kafka_producer and REX_KAFKA_TOPIC_AVSCAN_RESPONSE not in [None, ""]:
             kafka_scan_results(
                 kafka_producer,
                 s3_object,
