@@ -18,8 +18,13 @@ import json
 import os
 import signal
 import psutil
+import traceback
+import uuid
+import logging
 from urllib.parse import unquote_plus
 from common import strtobool
+from kafka import KafkaProducer
+from kafka.errors import KafkaError
 
 import boto3
 
@@ -27,14 +32,15 @@ import clamav
 from common import AV_DELETE_INFECTED_FILES
 from common import AV_PROCESS_ORIGINAL_VERSION_ONLY
 from common import AV_SCAN_START_METADATA
-from common import AV_SCAN_START_SNS_ARN
+from common import REX_KAFKA_BOOTSTRAP_SERVERS
+from common import AV_SCAN_START_TOPIC
 from common import AV_SIGNATURE_METADATA
 from common import AV_STATUS_CLEAN
 from common import AV_STATUS_INFECTED
 from common import AV_STATUS_METADATA
-from common import AV_STATUS_SNS_ARN
-from common import AV_STATUS_SNS_PUBLISH_CLEAN
-from common import AV_STATUS_SNS_PUBLISH_INFECTED
+from common import REX_KAFKA_TOPIC_AVSCAN_RESPONSE
+from common import AV_STATUS_PUBLISH_CLEAN
+from common import AV_STATUS_PUBLISH_INFECTED
 from common import AV_TIMESTAMP_METADATA
 from common import AV_EFS_MOUNT_POINT
 from common import create_dir
@@ -42,6 +48,51 @@ from common import get_timestamp
 
 DEFAULT_SCAN_DIR = "/tmp"
 clamd_pid = None
+
+# Global Kafka producer - persists across Lambda invocations
+kafka_producer = None
+
+logger = logging.getLogger()
+
+for handler in logger.handlers:
+    logger.removeHandler(handler)
+
+stream_handler = logging.StreamHandler()
+
+formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
+stream_handler.setFormatter(formatter)
+
+logger.addHandler(stream_handler)
+logger.setLevel(logging.INFO)
+
+def get_kafka_producer():
+    """Get or create a Kafka producer instance that persists across invocations."""
+    global kafka_producer
+
+    # Return None if bootstrap servers not configured
+    if not REX_KAFKA_BOOTSTRAP_SERVERS:
+        return None
+
+    # Create producer if it doesn't exist
+    if kafka_producer is None:
+        try:
+            kafka_producer = KafkaProducer(
+                bootstrap_servers=REX_KAFKA_BOOTSTRAP_SERVERS.split(','),
+                security_protocol='PLAINTEXT',
+                api_version = (3, 5, 1),
+                value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+                # Add some sensible defaults for Lambda environment
+                request_timeout_ms=30000,
+                retry_backoff_ms=500,
+                max_in_flight_requests_per_connection=1,
+                acks='all'
+            )
+            logging.info("Created new Kafka producer")
+        except Exception as e:
+            logging.error(f"Failed to create Kafka producer: {e}")
+            traceback.print_exc()
+            return None
+    return kafka_producer
 
 
 def event_object(event, event_source="s3"):
@@ -170,7 +221,7 @@ def set_av_tags(s3_client, s3_object, scan_result, scan_signature, timestamp):
     )
 
 
-def sns_start_scan(sns_client, s3_object, scan_start_sns_arn, timestamp):
+def kafka_start_scan(producer, s3_object, scan_start_topic, timestamp):
     message = {
         "bucket": s3_object.bucket_name,
         "key": s3_object.key,
@@ -178,44 +229,42 @@ def sns_start_scan(sns_client, s3_object, scan_start_sns_arn, timestamp):
         AV_SCAN_START_METADATA: True,
         AV_TIMESTAMP_METADATA: timestamp,
     }
-    sns_client.publish(
-        TargetArn=scan_start_sns_arn,
-        Message=json.dumps({"default": json.dumps(message)}),
-        MessageStructure="json",
-    )
+    try:
+        producer.send(scan_start_topic, message)
+        producer.flush()
+    except KafkaError as e:
+        logging.error(f"Failed to send Kafka start scan message: {e}")
 
 
-def sns_scan_results(
-    sns_client, s3_object, sns_arn, scan_result, scan_signature, timestamp
+def kafka_scan_results(
+    producer, s3_object, scan_result, scan_signature, timestamp
 ):
     # Don't publish if scan_result is CLEAN and CLEAN results should not be published
-    if scan_result == AV_STATUS_CLEAN and not str_to_bool(AV_STATUS_SNS_PUBLISH_CLEAN):
+    if scan_result == AV_STATUS_CLEAN and not str_to_bool(AV_STATUS_PUBLISH_CLEAN):
         return
     # Don't publish if scan_result is INFECTED and INFECTED results should not be published
     if scan_result == AV_STATUS_INFECTED and not str_to_bool(
-        AV_STATUS_SNS_PUBLISH_INFECTED
+        AV_STATUS_PUBLISH_INFECTED
     ):
         return
+    message_key = str(uuid.uuid4()).encode('utf-8')
+    headers = [
+        ('bucket', s3_object.bucket_name.encode('utf-8')),
+        ('transactionId', message_key)
+    ]
     message = {
-        "bucket": s3_object.bucket_name,
         "key": s3_object.key,
         "version": s3_object.version_id,
         AV_SIGNATURE_METADATA: scan_signature,
         AV_STATUS_METADATA: scan_result,
         AV_TIMESTAMP_METADATA: get_timestamp(),
     }
-    sns_client.publish(
-        TargetArn=sns_arn,
-        Message=json.dumps({"default": json.dumps(message)}),
-        MessageStructure="json",
-        MessageAttributes={
-            AV_STATUS_METADATA: {"DataType": "String", "StringValue": scan_result},
-            AV_SIGNATURE_METADATA: {
-                "DataType": "String",
-                "StringValue": scan_signature,
-            },
-        },
-    )
+    try:
+        logging.info(f"Sending message to topic {REX_KAFKA_TOPIC_AVSCAN_RESPONSE} with key={message_key} and headers={headers} and value= {message}")
+        producer.send(REX_KAFKA_TOPIC_AVSCAN_RESPONSE, key=message_key, value=message, headers=headers)
+        producer.flush()
+    except KafkaError as e:
+        logging.error(f"Failed to send Kafka scan results message: {e}")
 
 
 def kill_process_by_pid(pid):
@@ -238,7 +287,9 @@ def lambda_handler(event, context):
 
     s3 = boto3.resource("s3")
     s3_client = boto3.client("s3")
-    sns_client = boto3.client("sns")
+
+    # Get the persistent Kafka producer
+    kafka_producer = get_kafka_producer()
 
     # Get some environment variables
     ENV = os.getenv("ENV", "")
@@ -263,9 +314,9 @@ def lambda_handler(event, context):
         verify_s3_object_version(s3, s3_object)
 
     # Publish the start time of the scan
-    if AV_SCAN_START_SNS_ARN not in [None, ""]:
+    if kafka_producer and AV_SCAN_START_TOPIC not in [None, ""]:
         start_scan_time = get_timestamp()
-        sns_start_scan(sns_client, s3_object, AV_SCAN_START_SNS_ARN, start_scan_time)
+        kafka_start_scan(kafka_producer, s3_object, AV_SCAN_START_TOPIC, start_scan_time)
 
     file_path = get_local_path(s3_object)
     try:
@@ -285,11 +336,10 @@ def lambda_handler(event, context):
         set_av_tags(s3_client, s3_object, scan_result, scan_signature, result_time)
 
         # Publish the scan results
-        if AV_STATUS_SNS_ARN not in [None, ""]:
-            sns_scan_results(
-                sns_client,
+        if kafka_producer and REX_KAFKA_TOPIC_AVSCAN_RESPONSE not in [None, ""]:
+            kafka_scan_results(
+                kafka_producer,
                 s3_object,
-                AV_STATUS_SNS_ARN,
                 scan_result,
                 scan_signature,
                 result_time,
@@ -305,6 +355,9 @@ def lambda_handler(event, context):
             os.remove(file_path)
         except OSError:
             pass
+
+        # Don't close Kafka producer - let it persist for future invocations
+        # It will be reused by subsequent Lambda invocations for better performance
 
 
 def str_to_bool(s):
