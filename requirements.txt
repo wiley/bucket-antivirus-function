@@ -6,3 +6,4 @@ requests
 simplejson
 urllib3
 psutil
+kafka-python
