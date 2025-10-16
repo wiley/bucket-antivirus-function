@@ -24,7 +24,7 @@ steps:
     depends_on:
       - package_lambda
     plugins:
-      - artifacts#v1.9.0:
+      - artifacts#v1.9.4:
           download:
             - build/lambda.zip
 
@@ -36,6 +36,6 @@ steps:
     depends_on:
       - package_lambda
     plugins:
-      - artifacts#v1.9.0:
+      - artifacts#v1.9.4:
           download:
             - build/lambda.zip

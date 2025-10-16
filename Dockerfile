@@ -1,4 +1,6 @@
-FROM artifactory.aws.wiley.com/docker/amazonlinux:2023 as clamav
+# This repo seems to be a private mirror.
+#FROM artifactory.aws.wiley.com/docker/amazonlinux:2023 as clamav
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023 as clamav
 
 ARG clamav_version=1.4.1
 
@@ -7,19 +9,18 @@ RUN yum install -y cpio wget
 
 # Set up working directories
 RUN mkdir -p /opt/app/bin/
-RUN mkdir -p /opt/app/python_modules
 
 # Download libraries we need to run in lambda
 WORKDIR /tmp
-RUN wget https://www.clamav.net/downloads/production/clamav-${clamav_version}.linux.x86_64.deb -O clamav.deb -U "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:93.0) Gecko/20100101 Firefox/93.0" --no-verbose
+RUN wget https://www.clamav.net/downloads/production/clamav-${clamav_version}.linux.x86_64.rpm -O clamav.rpm -U "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:93.0) Gecko/20100101 Firefox/93.0" --no-verbose
 
-RUN dpkg-deb -R clamav.deb /tmp
+RUN rpm2cpio clamav.rpm | cpio -idmv
 
 # Copy over the binaries and libraries
 RUN cp -r /tmp/usr/local/bin/clamdscan \
        /tmp/usr/local/sbin/clamd \
        /tmp/usr/local/bin/freshclam \
-       /tmp/usr/local/lib/lib* \
+       /tmp/usr/local/lib64/* \
        /opt/app/bin/
 
 RUN echo "DatabaseDirectory /tmp/clamav_defs" > /opt/app/bin/scan.conf
@@ -32,7 +33,9 @@ RUN echo "FixStaleSocket yes" >> /opt/app/bin/scan.conf
 RUN echo "DatabaseMirror database.clamav.net" > /opt/app/bin/freshclam.conf
 RUN echo "CompressLocalDatabase yes" >> /opt/app/bin/freshclam.conf
 
-FROM artifactory.aws.wiley.com/docker/python:3.12
+# This repo seems to be a private mirror.
+# FROM artifactory.aws.wiley.com/docker/python:3.12
+FROM python:3.12
 
 ARG dist=/opt/app
 

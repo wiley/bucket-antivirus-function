@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Upside Travel, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,33 +14,32 @@
 # limitations under the License.
 
 import datetime
-import errno
 import hashlib
 import os
 import pwd
-import socket
+import re
 import subprocess
+import socket
+import errno
 
 import boto3
 import botocore
 
-from common import (
-    AV_DEFINITION_FILE_PREFIXES,
-    AV_DEFINITION_FILE_SUFFIXES,
-    AV_DEFINITION_PATH,
-    AV_DEFINITION_S3_BUCKET,
-    AV_DEFINITION_S3_PREFIX,
-    AV_SIGNATURE_OK,
-    AV_SIGNATURE_UNKNOWN,
-    AV_STATUS_CLEAN,
-    AV_STATUS_INFECTED,
-    CLAMAVLIB_PATH,
-    CLAMD_SOCKET,
-    CLAMDSCAN_PATH,
-    CLAMDSCAN_TIMEOUT,
-    FRESHCLAM_PATH,
-    create_dir,
-)
+from common import AV_DEFINITION_S3_BUCKET
+from common import AV_DEFINITION_S3_PREFIX
+from common import AV_DEFINITION_PATH
+from common import AV_DEFINITION_FILE_PREFIXES
+from common import AV_DEFINITION_FILE_SUFFIXES
+from common import AV_SIGNATURE_OK
+from common import AV_SIGNATURE_UNKNOWN
+from common import AV_STATUS_CLEAN
+from common import AV_STATUS_INFECTED
+from common import CLAMAVLIB_PATH
+from common import CLAMDSCAN_PATH
+from common import FRESHCLAM_PATH
+from common import CLAMDSCAN_TIMEOUT
+from common import create_dir
+from common import CLAMD_SOCKET
 
 
 def update_defs_from_s3(s3_client, bucket, prefix):
@@ -57,7 +57,8 @@ def update_defs_from_s3(s3_client, bucket, prefix):
             if s3_best_time is not None and s3_time < s3_best_time:
                 print("Not downloading older file in series: %s" % filename)
                 continue
-            s3_best_time = s3_time
+            else:
+                s3_best_time = s3_time
 
             if os.path.exists(local_path) and md5_from_file(local_path) == s3_md5:
                 print("Not downloading %s because local md5 matches s3." % filename)
@@ -77,8 +78,13 @@ def upload_defs_to_s3(s3_client, bucket, prefix, local_path):
             local_file_path = os.path.join(local_path, filename)
             if os.path.exists(local_file_path):
                 local_file_md5 = md5_from_file(local_file_path)
-                if local_file_md5 != md5_from_s3_tags(s3_client, bucket, os.path.join(prefix, filename)):
-                    print("Uploading %s to s3://%s" % (local_file_path, os.path.join(bucket, prefix, filename)))
+                if local_file_md5 != md5_from_s3_tags(
+                    s3_client, bucket, os.path.join(prefix, filename)
+                ):
+                    print(
+                        "Uploading %s to s3://%s"
+                        % (local_file_path, os.path.join(bucket, prefix, filename))
+                    )
                     s3 = boto3.resource("s3")
                     s3_object = s3.Object(bucket, os.path.join(prefix, filename))
                     s3_object.upload_file(os.path.join(local_path, filename))
@@ -88,7 +94,10 @@ def upload_defs_to_s3(s3_client, bucket, prefix, local_path):
                         Tagging={"TagSet": [{"Key": "md5", "Value": local_file_md5}]},
                     )
                 else:
-                    print("Not uploading %s because md5 on remote matches local." % filename)
+                    print(
+                        "Not uploading %s because md5 on remote matches local."
+                        % filename
+                    )
             else:
                 print("File does not exist: %s" % filename)
 
@@ -137,7 +146,8 @@ def md5_from_s3_tags(s3_client, bucket, key):
         }
         if e.response["Error"]["Code"] in expected_errors:
             return ""
-        raise
+        else:
+            raise
     for tag in tags:
         if tag["Key"] == "md5":
             return tag["Value"]
@@ -151,7 +161,8 @@ def time_from_s3(s3_client, bucket, key):
         expected_errors = {"404", "AccessDenied", "NoSuchKey"}
         if e.response["Error"]["Code"] in expected_errors:
             return datetime.datetime.fromtimestamp(0, datetime.UTC)
-        raise
+        else:
+            raise
     return time
 
 
@@ -194,18 +205,19 @@ def scan_file(path):
 
     if av_proc.returncode == 0:
         return AV_STATUS_CLEAN, AV_SIGNATURE_OK
-    if av_proc.returncode == 1:
+    elif av_proc.returncode == 1:
         # Turn the output into a data source we can read
         summary = scan_output_to_json(decoded_output)
         signature = summary.get(path, AV_SIGNATURE_UNKNOWN)
         return AV_STATUS_INFECTED, signature
-    msg = "Unexpected exit code from clamdscan: %s.\n" % av_proc.returncode
+    else:
+        msg = "Unexpected exit code from clamdscan: %s.\n" % av_proc.returncode
 
-    if errors:
-        msg += "Errors: %s\n" % errors.decode()
+        if errors:
+            msg += "Errors: %s\n" % errors.decode()
 
-    print(msg)
-    raise Exception(msg)
+        print(msg)
+        raise Exception(msg)
 
 
 def is_clamd_running():
@@ -218,7 +230,7 @@ def is_clamd_running():
                 s.connect(CLAMD_SOCKET)
                 s.send(b"PING")
                 data = s.recv(32)
-            except (TimeoutError, OSError) as e:
+            except (socket.timeout, socket.error) as e:
                 print("Failed to read from socket: %s\n" % e)
                 return False
 
@@ -233,7 +245,9 @@ def start_clamd_daemon():
     s3 = boto3.resource("s3")
     s3_client = boto3.client("s3")
 
-    to_download = update_defs_from_s3(s3_client, AV_DEFINITION_S3_BUCKET, AV_DEFINITION_S3_PREFIX)
+    to_download = update_defs_from_s3(
+        s3_client, AV_DEFINITION_S3_BUCKET, AV_DEFINITION_S3_PREFIX
+    )
 
     for download in to_download.values():
         s3_path = download["s3_path"]
