@@ -146,19 +146,19 @@ def get_circuit_breaker_state():
 def check_circuit_breaker():
     """
     Check if circuit breaker allows the request to proceed.
-    
+
     Returns:
         bool: True if request can proceed, False otherwise
-        
+
     Raises:
         CircuitBreakerOpen: If circuit is open and not ready for probe
     """
     with circuit_breaker_lock:
         state = circuit_breaker_state["state"]
-        
+
         if state == "CLOSED":
             return True
-        
+
         if state == "OPEN":
             # Check if recovery timeout has elapsed
             if circuit_breaker_state["last_failure_time"]:
@@ -171,7 +171,7 @@ def check_circuit_breaker():
                         f"Circuit breaker transitioning to HALF_OPEN after {elapsed:.1f}s recovery period"
                     )
                     return True
-            
+
             logger.warning(
                 f"Circuit breaker is OPEN - rejecting Kafka request. "
                 f"Last error: {circuit_breaker_state['last_error']}"
@@ -180,11 +180,11 @@ def check_circuit_breaker():
                 f"Circuit breaker is open due to {circuit_breaker_state['failure_count']} "
                 f"consecutive failures. Last error: {circuit_breaker_state['last_error']}"
             )
-        
+
         if state == "HALF_OPEN":
             # Allow probe request through
             return True
-        
+
         return True
 
 
@@ -210,7 +210,7 @@ def record_circuit_breaker_failure(error):
         circuit_breaker_state["failure_count"] += 1
         circuit_breaker_state["last_failure_time"] = time.time()
         circuit_breaker_state["last_error"] = str(error)[:200]  # Truncate long errors
-        
+
         if circuit_breaker_state["state"] == "HALF_OPEN":
             # Failed during probe - reopen circuit
             circuit_breaker_state["state"] = "OPEN"
@@ -244,12 +244,12 @@ def reset_circuit_breaker():
 def create_kafka_producer():
     """
     Create a new Kafka producer with optimized settings for Lambda environment.
-    
+
     Configuration includes:
     - Connection keepalive to maintain persistent connections
     - Appropriate timeouts for Lambda execution context
     - Retry settings for transient failures
-    
+
     Returns:
         KafkaProducer: Configured producer instance or None if creation fails
     """
@@ -259,26 +259,26 @@ def create_kafka_producer():
             security_protocol='PLAINTEXT',
             api_version=(3, 5, 1),
             value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-            
+
             # Connection keepalive settings - prevents idle connection drops
             connections_max_idle_ms=KAFKA_CONNECTIONS_MAX_IDLE_MS,
-            
+
             # Request timeout - time to wait for broker response
             request_timeout_ms=KAFKA_REQUEST_TIMEOUT_MS,
-            
+
             # Retry settings at kafka-python level
             retries=KAFKA_RETRIES,
             retry_backoff_ms=KAFKA_RETRY_BACKOFF_MS,
-            
+
             # Metadata refresh interval - keeps cluster info current
             metadata_max_age_ms=KAFKA_METADATA_MAX_AGE_MS,
-            
+
             # Delivery guarantees
             acks='all',
-            
+
             # Single in-flight request for ordering guarantees
             max_in_flight_requests_per_connection=1,
-            
+
             # Linger time - small batch window for efficiency
             linger_ms=10,
         )
@@ -317,11 +317,11 @@ def close_kafka_producer():
 def get_kafka_producer():
     """
     Get or create a Kafka producer instance that persists across invocations.
-    
+
     This function implements connection pooling by maintaining a global producer
     instance. The producer is created lazily on first use and reused for
     subsequent invocations.
-    
+
     Returns:
         KafkaProducer: Configured producer instance or None if Kafka is not configured
     """
@@ -340,14 +340,14 @@ def get_kafka_producer():
                 logger.error(f"Failed to create Kafka producer: {e}")
                 record_circuit_breaker_failure(e)
                 return None
-        
+
         return kafka_producer
 
 
 def recreate_kafka_producer():
     """
     Force recreation of the Kafka producer.
-    
+
     Used when connection issues are detected to establish a fresh connection.
     """
     global kafka_producer
@@ -358,7 +358,7 @@ def recreate_kafka_producer():
             except Exception as e:
                 logger.warning(f"Error closing old Kafka producer during recreation: {e}")
             kafka_producer = None
-        
+
         try:
             kafka_producer = create_kafka_producer()
             logger.info("Successfully recreated Kafka producer")
@@ -376,12 +376,12 @@ def recreate_kafka_producer():
 def calculate_backoff_delay(attempt, base_delay=None, max_delay=None):
     """
     Calculate exponential backoff delay with jitter.
-    
+
     Args:
         attempt: Current attempt number (0-indexed)
         base_delay: Base delay in seconds (default from env)
         max_delay: Maximum delay cap in seconds (default from env)
-    
+
     Returns:
         float: Delay in seconds before next retry
     """
@@ -389,14 +389,14 @@ def calculate_backoff_delay(attempt, base_delay=None, max_delay=None):
         base_delay = KAFKA_SEND_RETRY_BASE_DELAY
     if max_delay is None:
         max_delay = KAFKA_SEND_RETRY_MAX_DELAY
-    
+
     # Exponential backoff: base * 2^attempt
     delay = base_delay * (2 ** attempt)
-    
+
     # Add jitter (±25% randomization)
     jitter = delay * 0.25 * (2 * random.random() - 1)
     delay = delay + jitter
-    
+
     # Cap at maximum delay
     return min(delay, max_delay)
 
@@ -404,11 +404,11 @@ def calculate_backoff_delay(attempt, base_delay=None, max_delay=None):
 def send_with_retry(producer, topic, message, key=None, headers=None, max_retries=None):
     """
     Send a message to Kafka with retry logic and exponential backoff.
-    
+
     This function handles transient failures by retrying with exponential backoff.
     It also integrates with the circuit breaker to prevent hammering a failing
     Kafka cluster.
-    
+
     Args:
         producer: KafkaProducer instance
         topic: Target Kafka topic
@@ -416,42 +416,42 @@ def send_with_retry(producer, topic, message, key=None, headers=None, max_retrie
         key: Optional message key
         headers: Optional message headers
         max_retries: Maximum number of retry attempts (default from env)
-    
+
     Returns:
         bool: True if message was sent successfully, False otherwise
-    
+
     Raises:
         CircuitBreakerOpen: If circuit breaker is open
     """
     if max_retries is None:
         max_retries = KAFKA_MAX_SEND_RETRIES
-    
+
     # Check circuit breaker before attempting
     check_circuit_breaker()  # Raises CircuitBreakerOpen if open
-    
+
     last_error = None
     for attempt in range(max_retries + 1):
         try:
             # Send message
             future = producer.send(topic, key=key, value=message, headers=headers)
-            
+
             # Wait for confirmation with timeout
             # The timeout here is shorter than request_timeout_ms to allow for retries
             record_metadata = future.get(timeout=KAFKA_REQUEST_TIMEOUT_MS / 1000)
-            
+
             # Flush to ensure delivery
             producer.flush(timeout=5)
-            
+
             # Record success with circuit breaker
             record_circuit_breaker_success()
-            
+
             logger.info(
                 f"Successfully sent message to topic={topic}, "
                 f"partition={record_metadata.partition}, "
                 f"offset={record_metadata.offset}"
             )
             return True
-            
+
         except KafkaTimeoutError as e:
             last_error = e
             logger.warning(
@@ -461,7 +461,7 @@ def send_with_retry(producer, topic, message, key=None, headers=None, max_retrie
         except KafkaError as e:
             last_error = e
             error_str = str(e)
-            
+
             # Check for connection reset errors (errno 104)
             is_connection_error = (
                 "Connection reset by peer" in error_str or
@@ -469,33 +469,33 @@ def send_with_retry(producer, topic, message, key=None, headers=None, max_retrie
                 "[Errno 104]" in error_str or
                 "ConnectionError" in type(e).__name__
             )
-            
+
             logger.warning(
                 f"Kafka send error (attempt {attempt + 1}/{max_retries + 1}): "
                 f"topic={topic}, error_type={type(e).__name__}, error={e}, "
                 f"is_connection_error={is_connection_error}"
             )
-            
+
             # If connection error, try to recreate the producer
             if is_connection_error and attempt < max_retries:
                 logger.info("Attempting to recreate Kafka producer due to connection error")
                 new_producer = recreate_kafka_producer()
                 if new_producer:
                     producer = new_producer
-                    
+
         except Exception as e:
             last_error = e
             logger.error(
                 f"Unexpected error sending Kafka message (attempt {attempt + 1}/{max_retries + 1}): "
                 f"topic={topic}, error_type={type(e).__name__}, error={e}"
             )
-        
+
         # Don't sleep after the last attempt
         if attempt < max_retries:
             delay = calculate_backoff_delay(attempt)
             logger.info(f"Retrying Kafka send in {delay:.2f}s...")
             time.sleep(delay)
-    
+
     # All retries exhausted
     logger.error(
         f"Failed to send Kafka message after {max_retries + 1} attempts. "
@@ -634,15 +634,15 @@ def set_av_tags(s3_client, s3_object, scan_result, scan_signature, timestamp):
 def kafka_start_scan(producer, s3_object, scan_start_topic, timestamp):
     """
     Publish scan start event to Kafka.
-    
+
     Uses retry logic with exponential backoff and circuit breaker protection.
-    
+
     Args:
         producer: KafkaProducer instance
         s3_object: S3 object being scanned
         scan_start_topic: Kafka topic for scan start events
         timestamp: Scan start timestamp
-    
+
     Returns:
         bool: True if message was sent successfully, False otherwise
     """
@@ -653,7 +653,7 @@ def kafka_start_scan(producer, s3_object, scan_start_topic, timestamp):
         AV_SCAN_START_METADATA: True,
         AV_TIMESTAMP_METADATA: timestamp,
     }
-    
+
     try:
         success = send_with_retry(
             producer=producer,
@@ -685,18 +685,18 @@ def kafka_scan_results(
 ):
     """
     Publish scan results to Kafka.
-    
+
     Uses retry logic with exponential backoff and circuit breaker protection.
     Results are only published based on configuration (AV_STATUS_PUBLISH_CLEAN,
     AV_STATUS_PUBLISH_INFECTED).
-    
+
     Args:
         producer: KafkaProducer instance
         s3_object: S3 object that was scanned
         scan_result: Scan result (CLEAN or INFECTED)
         scan_signature: Virus signature if infected, OK otherwise
         timestamp: Scan completion timestamp
-    
+
     Returns:
         bool: True if message was sent successfully or skipped per config,
               False if send failed
@@ -705,12 +705,12 @@ def kafka_scan_results(
     if scan_result == AV_STATUS_CLEAN and not str_to_bool(AV_STATUS_PUBLISH_CLEAN):
         logger.debug(f"Skipping CLEAN result publish for s3://{s3_object.bucket_name}/{s3_object.key}")
         return True
-    
+
     # Don't publish if scan_result is INFECTED and INFECTED results should not be published
     if scan_result == AV_STATUS_INFECTED and not str_to_bool(AV_STATUS_PUBLISH_INFECTED):
         logger.debug(f"Skipping INFECTED result publish for s3://{s3_object.bucket_name}/{s3_object.key}")
         return True
-    
+
     message_key = str(uuid.uuid4()).encode('utf-8')
     headers = [
         ('bucket', s3_object.bucket_name.encode('utf-8')),
@@ -723,14 +723,14 @@ def kafka_scan_results(
         AV_STATUS_METADATA: scan_result,
         AV_TIMESTAMP_METADATA: get_timestamp(),
     }
-    
+
     try:
         logger.info(
             f"Sending scan results to topic={REX_KAFKA_TOPIC_AVSCAN_RESPONSE}, "
             f"key={message_key}, scan_result={scan_result}, "
             f"s3_object=s3://{s3_object.bucket_name}/{s3_object.key}"
         )
-        
+
         success = send_with_retry(
             producer=producer,
             topic=REX_KAFKA_TOPIC_AVSCAN_RESPONSE,
@@ -738,14 +738,14 @@ def kafka_scan_results(
             key=message_key,
             headers=headers
         )
-        
+
         if not success:
             logger.error(
                 f"Failed to send scan results for s3://{s3_object.bucket_name}/{s3_object.key} "
                 f"after all retries. scan_result={scan_result}"
             )
         return success
-        
+
     except CircuitBreakerOpen as e:
         logger.warning(
             f"Circuit breaker open - skipping scan results publish for "
@@ -763,22 +763,22 @@ def kafka_scan_results(
 def kill_process_by_pid(pid):
     # Check if process is running on PID
     try:
-        os.kill(clamd_pid, 0)
+        os.kill(pid, 0)
     except OSError:
         return
 
-    print("Killing the process by PID %s" % clamd_pid)
+    print("Killing the process by PID %s" % pid)
 
     try:
-        os.kill(clamd_pid, signal.SIGTERM)
+        os.kill(pid, signal.SIGTERM)
     except OSError:
-        os.kill(clamd_pid, signal.SIGKILL)
+        os.kill(pid, signal.SIGKILL)
 
 
 def get_kafka_status():
     """
     Get current Kafka connection and circuit breaker status for logging/monitoring.
-    
+
     Returns:
         dict: Status information including circuit breaker state and producer status
     """
@@ -790,7 +790,7 @@ def get_kafka_status():
             "success_count": circuit_breaker_state["success_count"],
             "last_error": circuit_breaker_state["last_error"],
         }
-    
+
     return {
         "producer_initialized": kafka_producer is not None,
         "bootstrap_servers": REX_KAFKA_BOOTSTRAP_SERVERS,
@@ -802,13 +802,13 @@ def get_kafka_status():
 def lambda_handler(event, context):
     """
     Lambda handler for S3 antivirus scanning.
-    
+
     This handler:
     1. Downloads S3 objects triggered by S3/SNS events
     2. Scans them for viruses using ClamAV
     3. Updates S3 object metadata/tags with scan results
     4. Publishes results to Kafka (if configured)
-    
+
     The Kafka producer is initialized globally and reused across invocations
     to maintain persistent connections to MSK brokers.
     """
@@ -822,7 +822,7 @@ def lambda_handler(event, context):
 
     # Get the persistent Kafka producer (reused across invocations)
     producer = get_kafka_producer()
-    
+
     # Log Kafka status at start of invocation
     if producer:
         status = get_kafka_status()
@@ -893,10 +893,10 @@ def lambda_handler(event, context):
 
         if str_to_bool(AV_DELETE_INFECTED_FILES) and scan_result == AV_STATUS_INFECTED:
             delete_s3_object(s3_object)
-        
+
         stop_scan_time = get_timestamp()
         print("Script finished at %s\n" % stop_scan_time)
-        
+
         # Log final Kafka status
         if producer:
             final_status = get_kafka_status()
@@ -904,7 +904,7 @@ def lambda_handler(event, context):
                 f"Kafka status at invocation end: circuit_breaker={final_status['circuit_breaker']['circuit_state']}, "
                 f"kafka_publish_success={kafka_publish_success}"
             )
-        
+
         # Return success - scan completed even if Kafka publishing failed
         # This ensures Lambda doesn't retry unnecessarily when MSK is down
         return {
@@ -916,7 +916,7 @@ def lambda_handler(event, context):
                 "kafka_publish_success": kafka_publish_success,
             }
         }
-        
+
     finally:
         # Delete downloaded file to free up room on re-usable lambda function container
         try:
