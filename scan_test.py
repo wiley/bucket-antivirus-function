@@ -685,14 +685,14 @@ class TestSendWithRetry(unittest.TestCase):
         delays = [call[0][0] for call in mock_sleep.call_args_list]
         
         # Base delay is 0.5s, max delay is 5.0s
-        # Attempt 0: 0.5 * 2^0 = 0.5s (with ±25% jitter: 0.375 to 0.625)
-        # Attempt 1: 0.5 * 2^1 = 1.0s (with ±25% jitter: 0.75 to 1.25)
+        # First retry (after 1st failure): 0.5 * 2^0 = 0.5s (with ±25% jitter: 0.375 to 0.625)
+        # Second retry (after 2nd failure): 0.5 * 2^1 = 1.0s (with ±25% jitter: 0.75 to 1.25)
         
-        # Verify first delay (after first failure)
+        # Verify first retry delay
         self.assertGreaterEqual(delays[0], 0.375)
         self.assertLessEqual(delays[0], 0.625)
         
-        # Verify second delay (after second failure)
+        # Verify second retry delay
         self.assertGreaterEqual(delays[1], 0.75)
         self.assertLessEqual(delays[1], 1.25)
 
