@@ -795,6 +795,87 @@ class TestSendWithRetry(unittest.TestCase):
         self.assertEqual(mock_new_producer.send.call_count, 1)
         mock_new_producer.flush.assert_called()
 
+    def test_handles_failed_producer_recreation(self):
+        """Should continue retrying when producer recreation fails."""
+        from kafka.errors import KafkaError
+        
+        # All attempts fail with connection error
+        mock_failure_future = Mock()
+        mock_failure_future.get.side_effect = KafkaError("Connection reset by peer")
+        self.mock_producer.send.return_value = mock_failure_future
+        
+        # Mock recreate_kafka_producer to fail (return None)
+        with patch('scan.recreate_kafka_producer') as mock_recreate:
+            mock_recreate.return_value = None
+            
+            with patch('scan.time.sleep'):  # Skip actual sleep
+                result = send_with_retry(
+                    self.mock_producer,
+                    "test-topic",
+                    {"test": "message"},
+                    max_retries=2
+                )
+        
+        # Should fail after all retries exhausted
+        self.assertFalse(result)
+        
+        # Verify recreate_kafka_producer was called on each retry
+        self.assertEqual(mock_recreate.call_count, 2)  # Called after 1st and 2nd failures
+        
+        # Original producer should be called for all attempts (since recreation failed)
+        self.assertEqual(self.mock_producer.send.call_count, 3)  # Initial + 2 retries
+
+    def test_handles_multiple_producer_recreations(self):
+        """Should recreate producer multiple times when multiple connection errors occur."""
+        from kafka.errors import KafkaError
+        
+        # Create mock producers for each recreation
+        mock_producer_2 = Mock()
+        mock_producer_3 = Mock()
+        
+        # Setup failure future for connection errors
+        mock_failure_future_1 = Mock()
+        mock_failure_future_1.get.side_effect = KafkaError("[Errno 104] Connection reset by peer")
+        
+        mock_failure_future_2 = Mock()
+        mock_failure_future_2.get.side_effect = KafkaError("errno=104")
+        
+        # Third producer succeeds
+        mock_success_future = Mock()
+        mock_metadata = Mock()
+        mock_metadata.partition = 0
+        mock_metadata.offset = 100
+        mock_success_future.get.return_value = mock_metadata
+        
+        # Setup mock producers
+        self.mock_producer.send.return_value = mock_failure_future_1
+        mock_producer_2.send.return_value = mock_failure_future_2
+        mock_producer_3.send.return_value = mock_success_future
+        
+        # Mock recreate_kafka_producer to return different producers on each call
+        with patch('scan.recreate_kafka_producer') as mock_recreate:
+            mock_recreate.side_effect = [mock_producer_2, mock_producer_3]
+            
+            with patch('scan.time.sleep'):  # Skip actual sleep
+                result = send_with_retry(
+                    self.mock_producer,
+                    "test-topic",
+                    {"test": "message"},
+                    max_retries=3
+                )
+        
+        # Should succeed after multiple recreations
+        self.assertTrue(result)
+        
+        # Verify recreate_kafka_producer was called twice
+        self.assertEqual(mock_recreate.call_count, 2)
+        
+        # Verify each producer was called once
+        self.assertEqual(self.mock_producer.send.call_count, 1)
+        self.assertEqual(mock_producer_2.send.call_count, 1)
+        self.assertEqual(mock_producer_3.send.call_count, 1)
+        mock_producer_3.flush.assert_called()
+
 
 class TestKafkaProducerManagement(unittest.TestCase):
     """Tests for Kafka producer lifecycle management."""
