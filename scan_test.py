@@ -647,7 +647,7 @@ class TestSendWithRetry(unittest.TestCase):
         self.mock_producer.flush.assert_called()
 
     def test_retries_on_timeout(self):
-        """Should retry on KafkaTimeoutError."""
+        """Should retry on KafkaTimeoutError with exponential backoff."""
         from kafka.errors import KafkaTimeoutError
         
         # First two calls fail, third succeeds
@@ -666,7 +666,7 @@ class TestSendWithRetry(unittest.TestCase):
             mock_future_success
         ]
 
-        with patch('scan.time.sleep'):  # Skip actual sleep
+        with patch('scan.time.sleep') as mock_sleep:  # Capture sleep calls
             result = send_with_retry(
                 self.mock_producer,
                 "test-topic",
@@ -676,6 +676,25 @@ class TestSendWithRetry(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertEqual(self.mock_producer.send.call_count, 3)
+        
+        # Verify exponential backoff delays
+        # With 3 send attempts (2 failures, 1 success), sleep should be called 2 times
+        self.assertEqual(mock_sleep.call_count, 2)
+        
+        # Extract the delay values from the calls
+        delays = [call[0][0] for call in mock_sleep.call_args_list]
+        
+        # Base delay is 0.5s, max delay is 5.0s
+        # Attempt 0: 0.5 * 2^0 = 0.5s (with ±25% jitter: 0.375 to 0.625)
+        # Attempt 1: 0.5 * 2^1 = 1.0s (with ±25% jitter: 0.75 to 1.25)
+        
+        # Verify first delay (after first failure)
+        self.assertGreaterEqual(delays[0], 0.375)
+        self.assertLessEqual(delays[0], 0.625)
+        
+        # Verify second delay (after second failure)
+        self.assertGreaterEqual(delays[1], 0.75)
+        self.assertLessEqual(delays[1], 1.25)
 
     def test_fails_after_max_retries(self):
         """Should return False after exhausting retries."""
