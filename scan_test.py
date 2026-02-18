@@ -752,6 +752,49 @@ class TestSendWithRetry(unittest.TestCase):
         self.assertFalse(result)
         self.assertGreater(circuit_breaker_state["failure_count"], initial_failures)
 
+    def test_recreates_producer_on_connection_error(self):
+        """Should recreate producer when connection error occurs and retry with new producer."""
+        from kafka.errors import KafkaError
+        
+        # Create a mock new producer that will be returned by recreate_kafka_producer
+        mock_new_producer = Mock()
+        mock_success_future = Mock()
+        mock_metadata = Mock()
+        mock_metadata.partition = 0
+        mock_metadata.offset = 100
+        mock_success_future.get.return_value = mock_metadata
+        mock_new_producer.send.return_value = mock_success_future
+        
+        # First attempt fails with connection error
+        mock_failure_future = Mock()
+        mock_failure_future.get.side_effect = KafkaError("Connection reset by peer")
+        self.mock_producer.send.return_value = mock_failure_future
+        
+        # Mock recreate_kafka_producer to return the new producer
+        with patch('scan.recreate_kafka_producer') as mock_recreate:
+            mock_recreate.return_value = mock_new_producer
+            
+            with patch('scan.time.sleep'):  # Skip actual sleep
+                result = send_with_retry(
+                    self.mock_producer,
+                    "test-topic",
+                    {"test": "message"},
+                    max_retries=2
+                )
+        
+        # Verify the result
+        self.assertTrue(result)
+        
+        # Verify recreate_kafka_producer was called due to connection error
+        mock_recreate.assert_called_once()
+        
+        # Verify original producer was called once (failed)
+        self.assertEqual(self.mock_producer.send.call_count, 1)
+        
+        # Verify new producer was called on retry and succeeded
+        self.assertEqual(mock_new_producer.send.call_count, 1)
+        mock_new_producer.flush.assert_called()
+
 
 class TestKafkaProducerManagement(unittest.TestCase):
     """Tests for Kafka producer lifecycle management."""
