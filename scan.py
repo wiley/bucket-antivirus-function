@@ -148,7 +148,7 @@ def check_circuit_breaker():
     Check if circuit breaker allows the request to proceed.
 
     Returns:
-        bool: True if request can proceed, False otherwise
+        bool: True if request can proceed, raises CircuitBreakerOpen otherwise
 
     Raises:
         CircuitBreakerOpen: If circuit is open and not ready for probe
