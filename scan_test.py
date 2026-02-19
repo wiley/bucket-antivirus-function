@@ -600,7 +600,7 @@ class TestExponentialBackoff(unittest.TestCase):
         """Backoff should be capped at max_delay."""
         max_delay = 2.0
         delay = calculate_backoff_delay(10, base_delay=0.5, max_delay=max_delay)
-        self.assertLessEqual(delay, max_delay * 1.25)  # Allow for jitter
+        self.assertLessEqual(delay, max_delay)
 
     def test_backoff_has_jitter(self):
         """Backoff should include jitter (randomization)."""
