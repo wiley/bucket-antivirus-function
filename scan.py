@@ -791,8 +791,11 @@ def get_kafka_status():
             "last_error": circuit_breaker_state["last_error"],
         }
 
+    with kafka_producer_lock:
+        producer_initialized = kafka_producer is not None
+
     return {
-        "producer_initialized": kafka_producer is not None,
+        "producer_initialized": producer_initialized,
         "bootstrap_servers": REX_KAFKA_BOOTSTRAP_SERVERS,
         "response_topic": REX_KAFKA_TOPIC_AVSCAN_RESPONSE,
         "circuit_breaker": cb_state,
