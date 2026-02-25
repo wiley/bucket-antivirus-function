@@ -760,6 +760,35 @@ class TestSendWithRetry(unittest.TestCase):
         self.assertFalse(result)
         self.assertGreater(circuit_breaker_state["failure_count"], initial_failures)
 
+    def test_returns_false_when_producer_is_none(self):
+        """Should retry with backoff and return False when get_kafka_producer returns None."""
+        with patch('scan.get_kafka_producer', return_value=None), \
+             patch('scan.KAFKA_SEND_RETRY_BASE_DELAY', 0.5), \
+             patch('scan.KAFKA_SEND_RETRY_MAX_DELAY', 5.0), \
+             patch('scan.time.sleep') as mock_sleep:
+            result = send_with_retry(
+                "test-topic",
+                {"test": "message"},
+                max_retries=2
+            )
+
+        # Should return False after exhausting all retries
+        self.assertFalse(result)
+
+        # sleep should be called between each attempt (not after the last)
+        self.assertEqual(mock_sleep.call_count, 2)
+
+        # Verify exponential backoff delays
+        base_delay = 0.5
+        max_delay = 5.0
+        delays = [call[0][0] for call in mock_sleep.call_args_list]
+        first_expected = min(base_delay * (2 ** 0), max_delay)
+        second_expected = min(base_delay * (2 ** 1), max_delay)
+        self.assertGreaterEqual(delays[0], first_expected * 0.75)
+        self.assertLessEqual(delays[0], first_expected * 1.25)
+        self.assertGreaterEqual(delays[1], second_expected * 0.75)
+        self.assertLessEqual(delays[1], second_expected * 1.25)
+
     def test_recreates_producer_on_connection_error(self):
         """Should recreate producer when connection error occurs and retry with new producer."""
         from kafka.errors import KafkaError
