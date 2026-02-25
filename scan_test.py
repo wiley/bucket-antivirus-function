@@ -1006,7 +1006,6 @@ class TestKafkaScanFunctions(unittest.TestCase):
         mock_send.return_value = True
 
         result = kafka_scan_results(
-            self.mock_producer,
             self.mock_s3_object,
             "CLEAN",
             "OK",
@@ -1021,7 +1020,6 @@ class TestKafkaScanFunctions(unittest.TestCase):
     def test_kafka_scan_results_skips_clean_when_disabled(self, mock_send):
         """kafka_scan_results should skip publishing when disabled for CLEAN."""
         result = kafka_scan_results(
-            self.mock_producer,
             self.mock_s3_object,
             "CLEAN",
             "OK",
@@ -1036,7 +1034,6 @@ class TestKafkaScanFunctions(unittest.TestCase):
     def test_kafka_scan_results_skips_infected_when_disabled(self, mock_send):
         """kafka_scan_results should skip publishing when disabled for INFECTED."""
         result = kafka_scan_results(
-            self.mock_producer,
             self.mock_s3_object,
             "INFECTED",
             "Virus.Test",
