@@ -401,7 +401,7 @@ def calculate_backoff_delay(attempt, base_delay=None, max_delay=None):
     return min(delay, max_delay)
 
 
-def send_with_retry(producer, topic, message, key=None, headers=None, max_retries=None):
+def send_with_retry(topic, message, key=None, headers=None, max_retries=None):
     """
     Send a message to Kafka with retry logic and exponential backoff.
 
@@ -409,8 +409,11 @@ def send_with_retry(producer, topic, message, key=None, headers=None, max_retrie
     It also integrates with the circuit breaker to prevent hammering a failing
     Kafka cluster.
 
+    The global Kafka producer is fetched at the start of each attempt so that
+    any producer recreated during a previous retry is automatically picked up,
+    and callers always use the latest producer instance.
+
     Args:
-        producer: KafkaProducer instance
         topic: Target Kafka topic
         message: Message value (will be serialized by producer)
         key: Optional message key
@@ -431,6 +434,15 @@ def send_with_retry(producer, topic, message, key=None, headers=None, max_retrie
 
     last_error = None
     for attempt in range(max_retries + 1):
+        # Fetch the current global producer on each attempt so that any producer
+        # recreated due to a connection error in a previous retry is used here,
+        # and any caller that holds a reference to an older instance stays consistent.
+        producer = get_kafka_producer()
+        if producer is None:
+            last_error = RuntimeError("No Kafka producer available")
+            logger.error("No Kafka producer available, cannot send Kafka message")
+            break
+
         try:
             # Send message
             future = producer.send(topic, key=key, value=message, headers=headers)
@@ -476,12 +488,11 @@ def send_with_retry(producer, topic, message, key=None, headers=None, max_retrie
                 f"is_connection_error={is_connection_error}"
             )
 
-            # If connection error, try to recreate the producer
+            # If connection error, recreate the producer so the next attempt
+            # (which fetches the global via get_kafka_producer) uses a fresh connection
             if is_connection_error and attempt < max_retries:
                 logger.info("Attempting to recreate Kafka producer due to connection error")
-                new_producer = recreate_kafka_producer()
-                if new_producer:
-                    producer = new_producer
+                recreate_kafka_producer()
 
         except Exception as e:
             last_error = e
@@ -656,7 +667,6 @@ def kafka_start_scan(producer, s3_object, scan_start_topic, timestamp):
 
     try:
         success = send_with_retry(
-            producer=producer,
             topic=scan_start_topic,
             message=message
         )
@@ -732,7 +742,6 @@ def kafka_scan_results(
         )
 
         success = send_with_retry(
-            producer=producer,
             topic=REX_KAFKA_TOPIC_AVSCAN_RESPONSE,
             message=message,
             key=message_key,

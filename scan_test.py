@@ -635,12 +635,12 @@ class TestSendWithRetry(unittest.TestCase):
         mock_future.get.return_value = mock_metadata
         self.mock_producer.send.return_value = mock_future
 
-        result = send_with_retry(
-            self.mock_producer, 
-            "test-topic", 
-            {"test": "message"},
-            max_retries=3
-        )
+        with patch('scan.get_kafka_producer', return_value=self.mock_producer):
+            result = send_with_retry(
+                "test-topic",
+                {"test": "message"},
+                max_retries=3
+            )
 
         self.assertTrue(result)
         self.mock_producer.send.assert_called_once()
@@ -666,13 +666,13 @@ class TestSendWithRetry(unittest.TestCase):
             mock_future_success
         ]
 
-        with patch('scan.time.sleep') as mock_sleep:  # Capture sleep calls
-            result = send_with_retry(
-                self.mock_producer,
-                "test-topic",
-                {"test": "message"},
-                max_retries=3
-            )
+        with patch('scan.get_kafka_producer', return_value=self.mock_producer):
+            with patch('scan.time.sleep') as mock_sleep:  # Capture sleep calls
+                result = send_with_retry(
+                    "test-topic",
+                    {"test": "message"},
+                    max_retries=3
+                )
 
         self.assertTrue(result)
         self.assertEqual(self.mock_producer.send.call_count, 3)
@@ -704,13 +704,13 @@ class TestSendWithRetry(unittest.TestCase):
         mock_future.get.side_effect = KafkaTimeoutError("Timeout")
         self.mock_producer.send.return_value = mock_future
 
-        with patch('scan.time.sleep'):  # Skip actual sleep
-            result = send_with_retry(
-                self.mock_producer,
-                "test-topic",
-                {"test": "message"},
-                max_retries=2
-            )
+        with patch('scan.get_kafka_producer', return_value=self.mock_producer):
+            with patch('scan.time.sleep'):  # Skip actual sleep
+                result = send_with_retry(
+                    "test-topic",
+                    {"test": "message"},
+                    max_retries=2
+                )
 
         self.assertFalse(result)
         self.assertEqual(self.mock_producer.send.call_count, 3)  # Initial + 2 retries
@@ -721,12 +721,12 @@ class TestSendWithRetry(unittest.TestCase):
         for i in range(CIRCUIT_BREAKER_FAILURE_THRESHOLD):
             record_circuit_breaker_failure(Exception(f"Test error {i}"))
 
-        with self.assertRaises(CircuitBreakerOpen):
-            send_with_retry(
-                self.mock_producer,
-                "test-topic",
-                {"test": "message"}
-            )
+        with patch('scan.get_kafka_producer', return_value=self.mock_producer):
+            with self.assertRaises(CircuitBreakerOpen):
+                send_with_retry(
+                    "test-topic",
+                    {"test": "message"}
+                )
 
         # Producer should not have been called
         self.mock_producer.send.assert_not_called()
@@ -741,13 +741,13 @@ class TestSendWithRetry(unittest.TestCase):
 
         initial_failures = circuit_breaker_state["failure_count"]
 
-        with patch('scan.time.sleep'):
-            result = send_with_retry(
-                self.mock_producer,
-                "test-topic",
-                {"test": "message"},
-                max_retries=0
-            )
+        with patch('scan.get_kafka_producer', return_value=self.mock_producer):
+            with patch('scan.time.sleep'):
+                result = send_with_retry(
+                    "test-topic",
+                    {"test": "message"},
+                    max_retries=0
+                )
 
         self.assertFalse(result)
         self.assertGreater(circuit_breaker_state["failure_count"], initial_failures)
@@ -756,7 +756,7 @@ class TestSendWithRetry(unittest.TestCase):
         """Should recreate producer when connection error occurs and retry with new producer."""
         from kafka.errors import KafkaError
         
-        # Create a mock recreated producer that will be returned by recreate_kafka_producer
+        # Create a mock recreated producer that will be used on the second attempt
         recreated_producer = Mock()
         successful_send_future = Mock()
         message_metadata = Mock()
@@ -770,17 +770,15 @@ class TestSendWithRetry(unittest.TestCase):
         connection_error_future.get.side_effect = KafkaError("Connection reset by peer")
         self.mock_producer.send.return_value = connection_error_future
         
-        # Mock recreate_kafka_producer to return the new producer
-        with patch('scan.recreate_kafka_producer') as mock_recreate:
-            mock_recreate.return_value = recreated_producer
-            
-            with patch('scan.time.sleep'):  # Skip actual sleep
-                result = send_with_retry(
-                    self.mock_producer,
-                    "test-topic",
-                    {"test": "message"},
-                    max_retries=2
-                )
+        # get_kafka_producer returns original producer on first attempt, recreated on second
+        with patch('scan.get_kafka_producer', side_effect=[self.mock_producer, recreated_producer]):
+            with patch('scan.recreate_kafka_producer') as mock_recreate:
+                with patch('scan.time.sleep'):  # Skip actual sleep
+                    result = send_with_retry(
+                        "test-topic",
+                        {"test": "message"},
+                        max_retries=2
+                    )
         
         # Verify the result
         self.assertTrue(result)
@@ -804,17 +802,18 @@ class TestSendWithRetry(unittest.TestCase):
         mock_failure_future.get.side_effect = KafkaError("Connection reset by peer")
         self.mock_producer.send.return_value = mock_failure_future
         
-        # Mock recreate_kafka_producer to fail (return None)
-        with patch('scan.recreate_kafka_producer') as mock_recreate:
-            mock_recreate.return_value = None
-            
-            with patch('scan.time.sleep'):  # Skip actual sleep
-                result = send_with_retry(
-                    self.mock_producer,
-                    "test-topic",
-                    {"test": "message"},
-                    max_retries=2
-                )
+        # Mock recreate_kafka_producer to fail (return None); get_kafka_producer keeps
+        # returning the same producer since recreation doesn't succeed
+        with patch('scan.get_kafka_producer', return_value=self.mock_producer):
+            with patch('scan.recreate_kafka_producer') as mock_recreate:
+                mock_recreate.return_value = None
+                
+                with patch('scan.time.sleep'):  # Skip actual sleep
+                    result = send_with_retry(
+                        "test-topic",
+                        {"test": "message"},
+                        max_retries=2
+                    )
         
         # Should fail after all retries exhausted
         self.assertFalse(result)
@@ -852,17 +851,17 @@ class TestSendWithRetry(unittest.TestCase):
         first_recreated_producer.send.return_value = second_connection_error_future
         second_recreated_producer.send.return_value = successful_send_future
         
-        # Mock recreate_kafka_producer to return different producers on each call
-        with patch('scan.recreate_kafka_producer') as mock_recreate:
-            mock_recreate.side_effect = [first_recreated_producer, second_recreated_producer]
-            
-            with patch('scan.time.sleep'):  # Skip actual sleep
-                result = send_with_retry(
-                    self.mock_producer,
-                    "test-topic",
-                    {"test": "message"},
-                    max_retries=3
-                )
+        # Mock get_kafka_producer to return each producer in sequence (one per attempt)
+        # and recreate_kafka_producer to just be called (the global update is simulated
+        # by get_kafka_producer returning the next producer on the following iteration)
+        with patch('scan.get_kafka_producer', side_effect=[self.mock_producer, first_recreated_producer, second_recreated_producer]):
+            with patch('scan.recreate_kafka_producer') as mock_recreate:
+                with patch('scan.time.sleep'):  # Skip actual sleep
+                    result = send_with_retry(
+                        "test-topic",
+                        {"test": "message"},
+                        max_retries=3
+                    )
         
         # Should succeed after multiple recreations
         self.assertTrue(result)
