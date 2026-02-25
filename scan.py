@@ -458,67 +458,66 @@ def send_with_retry(topic, message, key=None, headers=None, max_retries=None):
         if producer is None:
             last_error = RuntimeError("No Kafka producer available")
             logger.error("No Kafka producer available, cannot send Kafka message")
-            # Treat missing producer as retryable to allow backoff/retry for
-            # transient producer-creation failures.
-            continue
+            # Treat missing producer as retryable: fall through to apply backoff
+            # before the next attempt, allowing transient creation failures to recover.
+        else:
+            try:
+                # Send message
+                future = producer.send(topic, key=key, value=message, headers=headers)
 
-        try:
-            # Send message
-            future = producer.send(topic, key=key, value=message, headers=headers)
+                # Wait for confirmation with timeout
+                # The timeout here is shorter than request_timeout_ms to allow for retries
+                record_metadata = future.get(timeout=KAFKA_REQUEST_TIMEOUT_MS / 1000)
 
-            # Wait for confirmation with timeout
-            # The timeout here is shorter than request_timeout_ms to allow for retries
-            record_metadata = future.get(timeout=KAFKA_REQUEST_TIMEOUT_MS / 1000)
+                # Flush to ensure delivery
+                producer.flush(timeout=5)
 
-            # Flush to ensure delivery
-            producer.flush(timeout=5)
+                # Record success with circuit breaker
+                record_circuit_breaker_success()
 
-            # Record success with circuit breaker
-            record_circuit_breaker_success()
+                logger.info(
+                    f"Successfully sent message to topic={topic}, "
+                    f"partition={record_metadata.partition}, "
+                    f"offset={record_metadata.offset}"
+                )
+                return True
 
-            logger.info(
-                f"Successfully sent message to topic={topic}, "
-                f"partition={record_metadata.partition}, "
-                f"offset={record_metadata.offset}"
-            )
-            return True
+            except KafkaTimeoutError as e:
+                last_error = e
+                logger.warning(
+                    f"Kafka send timeout (attempt {attempt + 1}/{max_retries + 1}): "
+                    f"topic={topic}, error={e}"
+                )
+            except KafkaError as e:
+                last_error = e
+                error_str = str(e)
 
-        except KafkaTimeoutError as e:
-            last_error = e
-            logger.warning(
-                f"Kafka send timeout (attempt {attempt + 1}/{max_retries + 1}): "
-                f"topic={topic}, error={e}"
-            )
-        except KafkaError as e:
-            last_error = e
-            error_str = str(e)
+                # Check for connection reset errors (errno 104)
+                is_connection_error = (
+                    "Connection reset by peer" in error_str or
+                    "errno=104" in error_str or
+                    "[Errno 104]" in error_str or
+                    "ConnectionError" in type(e).__name__
+                )
 
-            # Check for connection reset errors (errno 104)
-            is_connection_error = (
-                "Connection reset by peer" in error_str or
-                "errno=104" in error_str or
-                "[Errno 104]" in error_str or
-                "ConnectionError" in type(e).__name__
-            )
+                logger.warning(
+                    f"Kafka send error (attempt {attempt + 1}/{max_retries + 1}): "
+                    f"topic={topic}, error_type={type(e).__name__}, error={e}, "
+                    f"is_connection_error={is_connection_error}"
+                )
 
-            logger.warning(
-                f"Kafka send error (attempt {attempt + 1}/{max_retries + 1}): "
-                f"topic={topic}, error_type={type(e).__name__}, error={e}, "
-                f"is_connection_error={is_connection_error}"
-            )
+                # If connection error, recreate the producer so the next attempt
+                # (which fetches the global via get_kafka_producer) uses a fresh connection
+                if is_connection_error and attempt < max_retries:
+                    logger.info("Attempting to recreate Kafka producer due to connection error")
+                    recreate_kafka_producer()
 
-            # If connection error, recreate the producer so the next attempt
-            # (which fetches the global via get_kafka_producer) uses a fresh connection
-            if is_connection_error and attempt < max_retries:
-                logger.info("Attempting to recreate Kafka producer due to connection error")
-                recreate_kafka_producer()
-
-        except Exception as e:
-            last_error = e
-            logger.error(
-                f"Unexpected error sending Kafka message (attempt {attempt + 1}/{max_retries + 1}): "
-                f"topic={topic}, error_type={type(e).__name__}, error={e}"
-            )
+            except Exception as e:
+                last_error = e
+                logger.error(
+                    f"Unexpected error sending Kafka message (attempt {attempt + 1}/{max_retries + 1}): "
+                    f"topic={topic}, error_type={type(e).__name__}, error={e}"
+                )
 
         # Don't sleep after the last attempt
         if attempt < max_retries:
