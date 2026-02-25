@@ -666,13 +666,15 @@ class TestSendWithRetry(unittest.TestCase):
             mock_future_success
         ]
 
-        with patch('scan.get_kafka_producer', return_value=self.mock_producer):
-            with patch('scan.time.sleep') as mock_sleep:  # Capture sleep calls
-                result = send_with_retry(
-                    "test-topic",
-                    {"test": "message"},
-                    max_retries=3
-                )
+        with patch('scan.KAFKA_SEND_RETRY_BASE_DELAY', 0.5), \
+             patch('scan.KAFKA_SEND_RETRY_MAX_DELAY', 5.0), \
+             patch('scan.get_kafka_producer', return_value=self.mock_producer), \
+             patch('scan.time.sleep') as mock_sleep:
+            result = send_with_retry(
+                "test-topic",
+                {"test": "message"},
+                max_retries=3
+            )
 
         self.assertTrue(result)
         self.assertEqual(self.mock_producer.send.call_count, 3)
@@ -684,17 +686,21 @@ class TestSendWithRetry(unittest.TestCase):
         # Extract the delay values from the calls
         delays = [call[0][0] for call in mock_sleep.call_args_list]
         
-        # Base delay is 0.5s, max delay is 5.0s
-        # First retry (after 1st failure): 0.5 * 2^0 = 0.5s (with ±25% jitter: 0.375 to 0.625)
-        # Second retry (after 2nd failure): 0.5 * 2^1 = 1.0s (with ±25% jitter: 0.75 to 1.25)
+        # Derive expected ranges from the patched module constants (±25% jitter)
+        base_delay = 0.5
+        max_delay = 5.0
+        # First retry (after 1st failure): base_delay * 2^0 = base_delay
+        first_expected = min(base_delay * (2 ** 0), max_delay)
+        # Second retry (after 2nd failure): base_delay * 2^1 = 2 * base_delay
+        second_expected = min(base_delay * (2 ** 1), max_delay)
         
         # Verify first retry delay
-        self.assertGreaterEqual(delays[0], 0.375)
-        self.assertLessEqual(delays[0], 0.625)
+        self.assertGreaterEqual(delays[0], first_expected * 0.75)
+        self.assertLessEqual(delays[0], first_expected * 1.25)
         
         # Verify second retry delay
-        self.assertGreaterEqual(delays[1], 0.75)
-        self.assertLessEqual(delays[1], 1.25)
+        self.assertGreaterEqual(delays[1], second_expected * 0.75)
+        self.assertLessEqual(delays[1], second_expected * 1.25)
 
     def test_fails_after_max_retries(self):
         """Should return False after exhausting retries."""
