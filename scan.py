@@ -693,7 +693,7 @@ def kafka_start_scan(producer, s3_object, scan_start_topic, timestamp):
 
 
 def kafka_scan_results(
-    producer, s3_object, scan_result, scan_signature, timestamp
+    s3_object, scan_result, scan_signature, timestamp
 ):
     """
     Publish scan results to Kafka.
@@ -703,7 +703,6 @@ def kafka_scan_results(
     AV_STATUS_PUBLISH_INFECTED).
 
     Args:
-        producer: KafkaProducer instance
         s3_object: S3 object that was scanned
         scan_result: Scan result (CLEAN or INFECTED)
         scan_signature: Virus signature if infected, OK otherwise
@@ -895,7 +894,6 @@ def lambda_handler(event, context):
         # Publish the scan results (non-blocking - failures don't fail the Lambda)
         if producer and REX_KAFKA_TOPIC_AVSCAN_RESPONSE not in [None, ""]:
             results_success = kafka_scan_results(
-                producer,
                 s3_object,
                 scan_result,
                 scan_signature,
