@@ -331,6 +331,7 @@ def get_kafka_producer():
     if not REX_KAFKA_BOOTSTRAP_SERVERS:
         return None
 
+    creation_error = None
     with kafka_producer_lock:
         # Create producer if it doesn't exist
         if kafka_producer is None:
@@ -338,10 +339,17 @@ def get_kafka_producer():
                 kafka_producer = create_kafka_producer()
             except Exception as e:
                 logger.error(f"Failed to create Kafka producer: {e}")
-                record_circuit_breaker_failure(e)
-                return None
+                creation_error = e
+        result = kafka_producer
 
-        return kafka_producer
+    # Record failure outside the lock to avoid deadlock with circuit_breaker_lock
+    # (get_kafka_status acquires circuit_breaker_lock -> kafka_producer_lock, so we
+    # must never acquire circuit_breaker_lock while holding kafka_producer_lock)
+    if creation_error is not None:
+        record_circuit_breaker_failure(creation_error)
+        return None
+
+    return result
 
 
 def recreate_kafka_producer():
@@ -351,6 +359,7 @@ def recreate_kafka_producer():
     Used when connection issues are detected to establish a fresh connection.
     """
     global kafka_producer
+    creation_error = None
     with kafka_producer_lock:
         if kafka_producer is not None:
             try:
@@ -362,11 +371,19 @@ def recreate_kafka_producer():
         try:
             kafka_producer = create_kafka_producer()
             logger.info("Successfully recreated Kafka producer")
-            return kafka_producer
         except Exception as e:
             logger.error(f"Failed to recreate Kafka producer: {e}")
-            record_circuit_breaker_failure(e)
-            return None
+            creation_error = e
+        result = kafka_producer
+
+    # Record failure outside the lock to avoid deadlock with circuit_breaker_lock
+    # (get_kafka_status acquires circuit_breaker_lock -> kafka_producer_lock, so we
+    # must never acquire circuit_breaker_lock while holding kafka_producer_lock)
+    if creation_error is not None:
+        record_circuit_breaker_failure(creation_error)
+        return None
+
+    return result
 
 
 # =============================================================================
