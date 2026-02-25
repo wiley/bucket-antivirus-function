@@ -441,7 +441,9 @@ def send_with_retry(topic, message, key=None, headers=None, max_retries=None):
         if producer is None:
             last_error = RuntimeError("No Kafka producer available")
             logger.error("No Kafka producer available, cannot send Kafka message")
-            break
+            # Treat missing producer as retryable to allow backoff/retry for
+            # transient producer-creation failures.
+            continue
 
         try:
             # Send message
