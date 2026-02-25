@@ -604,15 +604,17 @@ class TestExponentialBackoff(unittest.TestCase):
 
     def test_backoff_has_jitter(self):
         """Backoff should include jitter (randomization)."""
-        # Generate multiple delays for same attempt
-        delays = [calculate_backoff_delay(2, base_delay=1.0, max_delay=100) 
-                  for _ in range(10)]
-        
-        # Not all delays should be exactly the same due to jitter
-        unique_delays = set(round(d, 6) for d in delays)
-        self.assertGreater(len(unique_delays), 1)
+        # Make jitter deterministic by patching scan.random.random
+        with patch("scan.random.random", side_effect=[0.1, 0.2, 0.3]):
+            # Generate multiple delays for same attempt with controlled jitter
+            delays = [
+                calculate_backoff_delay(2, base_delay=1.0, max_delay=100)
+                for _ in range(3)
+            ]
 
-
+        # With different jitter values, resulting delays must differ
+        self.assertNotEqual(delays[0], delays[1])
+        self.assertEqual(len(set(delays)), 3)
 class TestSendWithRetry(unittest.TestCase):
     """Tests for send_with_retry functionality."""
 
