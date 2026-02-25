@@ -939,6 +939,38 @@ class TestKafkaProducerManagement(unittest.TestCase):
         mock_producer1.close.assert_called_once()
         self.assertEqual(mock_kafka_producer_class.call_count, 2)
 
+    @patch('scan.REX_KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
+    @patch('scan.record_circuit_breaker_failure')
+    @patch('scan.KafkaProducer')
+    def test_get_producer_records_circuit_breaker_failure_on_error(
+        self, mock_kafka_producer_class, mock_record_failure
+    ):
+        """Should notify circuit breaker (outside producer lock) when creation fails."""
+        error = Exception("Connection refused")
+        mock_kafka_producer_class.side_effect = error
+
+        result = get_kafka_producer()
+
+        self.assertIsNone(result)
+        mock_record_failure.assert_called_once_with(error)
+
+    @patch('scan.REX_KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
+    @patch('scan.record_circuit_breaker_failure')
+    @patch('scan.KafkaProducer')
+    def test_recreate_producer_records_circuit_breaker_failure_on_error(
+        self, mock_kafka_producer_class, mock_record_failure
+    ):
+        """Should notify circuit breaker (outside producer lock) when recreation fails."""
+        mock_producer1 = Mock()
+        error = Exception("Connection refused")
+        mock_kafka_producer_class.side_effect = [mock_producer1, error]
+
+        get_kafka_producer()
+        result = recreate_kafka_producer()
+
+        self.assertIsNone(result)
+        mock_record_failure.assert_called_once_with(error)
+
 
 class TestKafkaScanFunctions(unittest.TestCase):
     """Tests for kafka_start_scan and kafka_scan_results with retry logic."""

@@ -331,6 +331,7 @@ def get_kafka_producer():
     if not REX_KAFKA_BOOTSTRAP_SERVERS:
         return None
 
+    creation_error = None
     with kafka_producer_lock:
         # Create producer if it doesn't exist
         if kafka_producer is None:
@@ -338,10 +339,17 @@ def get_kafka_producer():
                 kafka_producer = create_kafka_producer()
             except Exception as e:
                 logger.error(f"Failed to create Kafka producer: {e}")
-                record_circuit_breaker_failure(e)
-                return None
+                creation_error = e
+        producer = kafka_producer
 
-        return kafka_producer
+    # Record failure outside kafka_producer_lock to avoid lock-order inversion
+    # with circuit_breaker_lock (get_kafka_status acquires circuit_breaker_lock
+    # then kafka_producer_lock, so we must never do the reverse).
+    if creation_error is not None:
+        record_circuit_breaker_failure(creation_error)
+        return None
+
+    return producer
 
 
 def recreate_kafka_producer():
@@ -351,6 +359,8 @@ def recreate_kafka_producer():
     Used when connection issues are detected to establish a fresh connection.
     """
     global kafka_producer
+    creation_error = None
+    producer = None
     with kafka_producer_lock:
         if kafka_producer is not None:
             try:
@@ -362,11 +372,19 @@ def recreate_kafka_producer():
         try:
             kafka_producer = create_kafka_producer()
             logger.info("Successfully recreated Kafka producer")
-            return kafka_producer
+            producer = kafka_producer
         except Exception as e:
             logger.error(f"Failed to recreate Kafka producer: {e}")
-            record_circuit_breaker_failure(e)
-            return None
+            creation_error = e
+
+    # Record failure outside kafka_producer_lock to avoid lock-order inversion
+    # with circuit_breaker_lock (get_kafka_status acquires circuit_breaker_lock
+    # then kafka_producer_lock, so we must never do the reverse).
+    if creation_error is not None:
+        record_circuit_breaker_failure(creation_error)
+        return None
+
+    return producer
 
 
 # =============================================================================
