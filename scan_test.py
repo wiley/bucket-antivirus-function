@@ -962,7 +962,6 @@ class TestKafkaScanFunctions(unittest.TestCase):
         mock_send.return_value = True
 
         result = kafka_start_scan(
-            self.mock_producer,
             self.mock_s3_object,
             "scan-start-topic",
             "2024-01-01 00:00:00"
@@ -977,7 +976,6 @@ class TestKafkaScanFunctions(unittest.TestCase):
         mock_send.return_value = False
 
         result = kafka_start_scan(
-            self.mock_producer,
             self.mock_s3_object,
             "scan-start-topic",
             "2024-01-01 00:00:00"
@@ -991,7 +989,6 @@ class TestKafkaScanFunctions(unittest.TestCase):
         mock_send.side_effect = CircuitBreakerOpen("Circuit open")
 
         result = kafka_start_scan(
-            self.mock_producer,
             self.mock_s3_object,
             "scan-start-topic",
             "2024-01-01 00:00:00"

@@ -644,14 +644,13 @@ def set_av_tags(s3_client, s3_object, scan_result, scan_signature, timestamp):
     )
 
 
-def kafka_start_scan(producer, s3_object, scan_start_topic, timestamp):
+def kafka_start_scan(s3_object, scan_start_topic, timestamp):
     """
     Publish scan start event to Kafka.
 
     Uses retry logic with exponential backoff and circuit breaker protection.
 
     Args:
-        producer: KafkaProducer instance
         s3_object: S3 object being scanned
         scan_start_topic: Kafka topic for scan start events
         timestamp: Scan start timestamp
@@ -869,7 +868,7 @@ def lambda_handler(event, context):
     # Publish the start time of the scan (non-blocking - failures don't stop scan)
     if producer and AV_SCAN_START_TOPIC not in [None, ""]:
         start_scan_time = get_timestamp()
-        start_success = kafka_start_scan(producer, s3_object, AV_SCAN_START_TOPIC, start_scan_time)
+        start_success = kafka_start_scan(s3_object, AV_SCAN_START_TOPIC, start_scan_time)
         if not start_success:
             kafka_publish_success = False
             logger.warning("Failed to publish scan start event, continuing with scan")
