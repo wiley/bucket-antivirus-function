@@ -15,7 +15,9 @@
 
 import datetime
 import json
+import time
 import unittest
+from unittest.mock import Mock, patch
 
 import boto3
 import botocore.session
@@ -35,6 +37,23 @@ from scan import set_av_tags
 from scan import kafka_start_scan
 from scan import kafka_scan_results
 from scan import verify_s3_object_version
+from scan import (
+    CircuitBreakerOpen,
+    check_circuit_breaker,
+    record_circuit_breaker_success,
+    record_circuit_breaker_failure,
+    reset_circuit_breaker,
+    get_circuit_breaker_state,
+    calculate_backoff_delay,
+    send_with_retry,
+    get_kafka_producer,
+    recreate_kafka_producer,
+    close_kafka_producer,
+    circuit_breaker_state,
+    CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+    CIRCUIT_BREAKER_RECOVERY_TIMEOUT,
+    CIRCUIT_BREAKER_SUCCESS_THRESHOLD,
+)
 
 
 class TestScan(unittest.TestCase):
@@ -461,3 +480,599 @@ class TestScan(unittest.TestCase):
                     self.s3_bucket_name, self.s3_key_name
                 ),
             )
+
+
+class TestCircuitBreaker(unittest.TestCase):
+    """Tests for circuit breaker functionality."""
+
+    def setUp(self):
+        """Reset circuit breaker state before each test."""
+        reset_circuit_breaker()
+
+    def tearDown(self):
+        """Clean up circuit breaker state after each test."""
+        reset_circuit_breaker()
+
+    def test_initial_state_is_closed(self):
+        """Circuit breaker should start in CLOSED state."""
+        self.assertEqual(get_circuit_breaker_state(), "CLOSED")
+
+    def test_check_circuit_breaker_allows_when_closed(self):
+        """Requests should be allowed when circuit is CLOSED."""
+        self.assertTrue(check_circuit_breaker())
+
+    def test_circuit_opens_after_failure_threshold(self):
+        """Circuit should open after reaching failure threshold."""
+        for i in range(CIRCUIT_BREAKER_FAILURE_THRESHOLD):
+            record_circuit_breaker_failure(Exception(f"Test error {i}"))
+        
+        self.assertEqual(get_circuit_breaker_state(), "OPEN")
+
+    def test_circuit_rejects_when_open(self):
+        """Requests should be rejected when circuit is OPEN."""
+        # Open the circuit
+        for i in range(CIRCUIT_BREAKER_FAILURE_THRESHOLD):
+            record_circuit_breaker_failure(Exception(f"Test error {i}"))
+        
+        with self.assertRaises(CircuitBreakerOpen):
+            check_circuit_breaker()
+
+    def test_success_resets_failure_count(self):
+        """Success should reset the failure count."""
+        # Record some failures but not enough to open circuit
+        for i in range(CIRCUIT_BREAKER_FAILURE_THRESHOLD - 1):
+            record_circuit_breaker_failure(Exception(f"Test error {i}"))
+        
+        # Record success
+        record_circuit_breaker_success()
+        
+        # Circuit should still be closed and failure count reset
+        self.assertEqual(get_circuit_breaker_state(), "CLOSED")
+        self.assertEqual(circuit_breaker_state["failure_count"], 0)
+
+    def test_circuit_transitions_to_half_open_after_recovery_timeout(self):
+        """Circuit should transition to HALF_OPEN after recovery timeout."""
+        # Open the circuit
+        for i in range(CIRCUIT_BREAKER_FAILURE_THRESHOLD):
+            record_circuit_breaker_failure(Exception(f"Test error {i}"))
+        
+        # Simulate time passing
+        circuit_breaker_state["last_failure_time"] = time.time() - CIRCUIT_BREAKER_RECOVERY_TIMEOUT - 1
+        
+        # Check should transition to HALF_OPEN and allow request
+        self.assertTrue(check_circuit_breaker())
+        self.assertEqual(get_circuit_breaker_state(), "HALF_OPEN")
+
+    def test_circuit_closes_after_success_threshold_in_half_open(self):
+        """Circuit should close after success threshold is met in HALF_OPEN state."""
+        # Put circuit in HALF_OPEN state
+        circuit_breaker_state["state"] = "HALF_OPEN"
+        circuit_breaker_state["success_count"] = 0
+        
+        # Record enough successes
+        for i in range(CIRCUIT_BREAKER_SUCCESS_THRESHOLD):
+            record_circuit_breaker_success()
+        
+        self.assertEqual(get_circuit_breaker_state(), "CLOSED")
+
+    def test_circuit_reopens_on_failure_in_half_open(self):
+        """Circuit should reopen on failure in HALF_OPEN state."""
+        # Put circuit in HALF_OPEN state
+        circuit_breaker_state["state"] = "HALF_OPEN"
+        
+        # Record failure
+        record_circuit_breaker_failure(Exception("Probe failure"))
+        
+        self.assertEqual(get_circuit_breaker_state(), "OPEN")
+
+    def test_reset_circuit_breaker(self):
+        """Reset should return circuit to initial state."""
+        # Open the circuit
+        for i in range(CIRCUIT_BREAKER_FAILURE_THRESHOLD):
+            record_circuit_breaker_failure(Exception(f"Test error {i}"))
+        
+        self.assertEqual(get_circuit_breaker_state(), "OPEN")
+        
+        # Reset
+        reset_circuit_breaker()
+        
+        self.assertEqual(get_circuit_breaker_state(), "CLOSED")
+        self.assertEqual(circuit_breaker_state["failure_count"], 0)
+        self.assertEqual(circuit_breaker_state["success_count"], 0)
+        self.assertIsNone(circuit_breaker_state["last_error"])
+
+
+class TestExponentialBackoff(unittest.TestCase):
+    """Tests for exponential backoff calculation."""
+
+    def test_backoff_increases_exponentially(self):
+        """Backoff delay should increase exponentially with attempts."""
+        base_delay = 0.5
+        delays = [calculate_backoff_delay(i, base_delay=base_delay, max_delay=100) 
+                  for i in range(5)]
+        
+        # Delays should generally increase (accounting for jitter)
+        # Check that later delays are in expected ranges
+        self.assertGreater(delays[2], base_delay)  # 3rd attempt should be > base
+        self.assertGreater(delays[4], delays[0])  # 5th should be > 1st
+
+    def test_backoff_respects_max_delay(self):
+        """Backoff should be capped at max_delay."""
+        max_delay = 2.0
+        delay = calculate_backoff_delay(10, base_delay=0.5, max_delay=max_delay)
+        self.assertLessEqual(delay, max_delay)
+
+    def test_backoff_has_jitter(self):
+        """Backoff should include jitter (randomization)."""
+        # Make jitter deterministic by patching scan.random.random
+        with patch("scan.random.random", side_effect=[0.1, 0.2, 0.3]):
+            # Generate multiple delays for same attempt with controlled jitter
+            delays = [
+                calculate_backoff_delay(2, base_delay=1.0, max_delay=100)
+                for _ in range(3)
+            ]
+
+        # With different jitter values, resulting delays must differ
+        self.assertNotEqual(delays[0], delays[1])
+        self.assertEqual(len(set(delays)), 3)
+class TestSendWithRetry(unittest.TestCase):
+    """Tests for send_with_retry functionality."""
+
+    def setUp(self):
+        """Reset circuit breaker and create mock producer."""
+        reset_circuit_breaker()
+        self.mock_producer = Mock()
+
+    def tearDown(self):
+        """Clean up after tests."""
+        reset_circuit_breaker()
+
+    def test_successful_send(self):
+        """Successful send should return True and record success."""
+        # Setup mock
+        mock_future = Mock()
+        mock_metadata = Mock()
+        mock_metadata.partition = 0
+        mock_metadata.offset = 100
+        mock_future.get.return_value = mock_metadata
+        self.mock_producer.send.return_value = mock_future
+
+        with patch('scan.get_kafka_producer', return_value=self.mock_producer):
+            result = send_with_retry(
+                "test-topic",
+                {"test": "message"},
+                max_retries=3
+            )
+
+        self.assertTrue(result)
+        self.mock_producer.send.assert_called_once()
+        self.mock_producer.flush.assert_called()
+
+    def test_retries_on_timeout(self):
+        """Should retry on KafkaTimeoutError with exponential backoff."""
+        from kafka.errors import KafkaTimeoutError
+        
+        # First two calls fail, third succeeds
+        mock_future_fail = Mock()
+        mock_future_fail.get.side_effect = KafkaTimeoutError("Timeout")
+        
+        mock_future_success = Mock()
+        mock_metadata = Mock()
+        mock_metadata.partition = 0
+        mock_metadata.offset = 100
+        mock_future_success.get.return_value = mock_metadata
+        
+        self.mock_producer.send.side_effect = [
+            mock_future_fail, 
+            mock_future_fail, 
+            mock_future_success
+        ]
+
+        with patch('scan.KAFKA_SEND_RETRY_BASE_DELAY', 0.5), \
+             patch('scan.KAFKA_SEND_RETRY_MAX_DELAY', 5.0), \
+             patch('scan.get_kafka_producer', return_value=self.mock_producer), \
+             patch('scan.time.sleep') as mock_sleep:
+            result = send_with_retry(
+                "test-topic",
+                {"test": "message"},
+                max_retries=3
+            )
+
+        self.assertTrue(result)
+        self.assertEqual(self.mock_producer.send.call_count, 3)
+        
+        # Verify exponential backoff delays
+        # With 3 send attempts (2 failures, 1 success), sleep should be called 2 times
+        self.assertEqual(mock_sleep.call_count, 2)
+        
+        # Extract the delay values from the calls
+        delays = [call[0][0] for call in mock_sleep.call_args_list]
+        
+        # Derive expected ranges from the patched module constants (±25% jitter)
+        base_delay = 0.5
+        max_delay = 5.0
+        # First retry (after 1st failure): base_delay * 2^0 = base_delay
+        first_expected = min(base_delay * (2 ** 0), max_delay)
+        # Second retry (after 2nd failure): base_delay * 2^1 = 2 * base_delay
+        second_expected = min(base_delay * (2 ** 1), max_delay)
+        
+        # Verify first retry delay
+        self.assertGreaterEqual(delays[0], first_expected * 0.75)
+        self.assertLessEqual(delays[0], first_expected * 1.25)
+        
+        # Verify second retry delay
+        self.assertGreaterEqual(delays[1], second_expected * 0.75)
+        self.assertLessEqual(delays[1], second_expected * 1.25)
+
+    def test_fails_after_max_retries(self):
+        """Should return False after exhausting retries."""
+        from kafka.errors import KafkaTimeoutError
+        
+        mock_future = Mock()
+        mock_future.get.side_effect = KafkaTimeoutError("Timeout")
+        self.mock_producer.send.return_value = mock_future
+
+        with patch('scan.get_kafka_producer', return_value=self.mock_producer):
+            with patch('scan.time.sleep'):  # Skip actual sleep
+                result = send_with_retry(
+                    "test-topic",
+                    {"test": "message"},
+                    max_retries=2
+                )
+
+        self.assertFalse(result)
+        self.assertEqual(self.mock_producer.send.call_count, 3)  # Initial + 2 retries
+
+    def test_circuit_breaker_blocks_send(self):
+        """Should raise CircuitBreakerOpen when circuit is open."""
+        # Open the circuit
+        for i in range(CIRCUIT_BREAKER_FAILURE_THRESHOLD):
+            record_circuit_breaker_failure(Exception(f"Test error {i}"))
+
+        with patch('scan.get_kafka_producer', return_value=self.mock_producer):
+            with self.assertRaises(CircuitBreakerOpen):
+                send_with_retry(
+                    "test-topic",
+                    {"test": "message"}
+                )
+
+        # Producer should not have been called
+        self.mock_producer.send.assert_not_called()
+
+    def test_records_failure_with_circuit_breaker(self):
+        """Failed sends should be recorded with circuit breaker."""
+        from kafka.errors import KafkaError
+        
+        mock_future = Mock()
+        mock_future.get.side_effect = KafkaError("Send failed")
+        self.mock_producer.send.return_value = mock_future
+
+        initial_failures = circuit_breaker_state["failure_count"]
+
+        with patch('scan.get_kafka_producer', return_value=self.mock_producer):
+            with patch('scan.time.sleep'):
+                result = send_with_retry(
+                    "test-topic",
+                    {"test": "message"},
+                    max_retries=0
+                )
+
+        self.assertFalse(result)
+        self.assertGreater(circuit_breaker_state["failure_count"], initial_failures)
+
+    def test_returns_false_when_producer_is_none(self):
+        """Should retry with backoff and return False when get_kafka_producer returns None."""
+        with patch('scan.get_kafka_producer', return_value=None), \
+             patch('scan.KAFKA_SEND_RETRY_BASE_DELAY', 0.5), \
+             patch('scan.KAFKA_SEND_RETRY_MAX_DELAY', 5.0), \
+             patch('scan.time.sleep') as mock_sleep:
+            result = send_with_retry(
+                "test-topic",
+                {"test": "message"},
+                max_retries=2
+            )
+
+        # Should return False after exhausting all retries
+        self.assertFalse(result)
+
+        # sleep should be called between each attempt (not after the last)
+        self.assertEqual(mock_sleep.call_count, 2)
+
+        # Verify exponential backoff delays
+        base_delay = 0.5
+        max_delay = 5.0
+        delays = [call[0][0] for call in mock_sleep.call_args_list]
+        first_expected = min(base_delay * (2 ** 0), max_delay)
+        second_expected = min(base_delay * (2 ** 1), max_delay)
+        self.assertGreaterEqual(delays[0], first_expected * 0.75)
+        self.assertLessEqual(delays[0], first_expected * 1.25)
+        self.assertGreaterEqual(delays[1], second_expected * 0.75)
+        self.assertLessEqual(delays[1], second_expected * 1.25)
+
+    def test_recreates_producer_on_connection_error(self):
+        """Should recreate producer when connection error occurs and retry with new producer."""
+        from kafka.errors import KafkaError
+        
+        # Create a mock recreated producer that will be used on the second attempt
+        recreated_producer = Mock()
+        successful_send_future = Mock()
+        message_metadata = Mock()
+        message_metadata.partition = 0
+        message_metadata.offset = 100
+        successful_send_future.get.return_value = message_metadata
+        recreated_producer.send.return_value = successful_send_future
+        
+        # First attempt fails with connection error
+        connection_error_future = Mock()
+        connection_error_future.get.side_effect = KafkaError("Connection reset by peer")
+        self.mock_producer.send.return_value = connection_error_future
+        
+        # get_kafka_producer returns original producer on first attempt, recreated on second
+        with patch('scan.get_kafka_producer', side_effect=[self.mock_producer, recreated_producer]):
+            with patch('scan.recreate_kafka_producer') as mock_recreate:
+                with patch('scan.time.sleep'):  # Skip actual sleep
+                    result = send_with_retry(
+                        "test-topic",
+                        {"test": "message"},
+                        max_retries=2
+                    )
+        
+        # Verify the result
+        self.assertTrue(result)
+        
+        # Verify recreate_kafka_producer was called due to connection error
+        mock_recreate.assert_called_once()
+        
+        # Verify original producer was called once (failed)
+        self.assertEqual(self.mock_producer.send.call_count, 1)
+        
+        # Verify new producer was called on retry and succeeded
+        self.assertEqual(recreated_producer.send.call_count, 1)
+        recreated_producer.flush.assert_called()
+
+    def test_handles_failed_producer_recreation(self):
+        """Should continue retrying when producer recreation fails."""
+        from kafka.errors import KafkaError
+        
+        # All attempts fail with connection error
+        mock_failure_future = Mock()
+        mock_failure_future.get.side_effect = KafkaError("Connection reset by peer")
+        self.mock_producer.send.return_value = mock_failure_future
+        
+        # Mock recreate_kafka_producer to fail (return None); get_kafka_producer keeps
+        # returning the same producer since recreation doesn't succeed
+        with patch('scan.get_kafka_producer', return_value=self.mock_producer):
+            with patch('scan.recreate_kafka_producer') as mock_recreate:
+                mock_recreate.return_value = None
+                
+                with patch('scan.time.sleep'):  # Skip actual sleep
+                    result = send_with_retry(
+                        "test-topic",
+                        {"test": "message"},
+                        max_retries=2
+                    )
+        
+        # Should fail after all retries exhausted
+        self.assertFalse(result)
+        
+        # Verify recreate_kafka_producer was called on each retry
+        self.assertEqual(mock_recreate.call_count, 2)  # Called after 1st and 2nd failures
+        
+        # Original producer should be called for all attempts (since recreation failed)
+        self.assertEqual(self.mock_producer.send.call_count, 3)  # Initial + 2 retries
+
+    def test_handles_multiple_producer_recreations(self):
+        """Should recreate producer multiple times when multiple connection errors occur."""
+        from kafka.errors import KafkaError
+        
+        # Create mock producers for each recreation
+        first_recreated_producer = Mock()
+        second_recreated_producer = Mock()
+        
+        # Setup failure future for connection errors
+        first_connection_error_future = Mock()
+        first_connection_error_future.get.side_effect = KafkaError("[Errno 104] Connection reset by peer")
+        
+        second_connection_error_future = Mock()
+        second_connection_error_future.get.side_effect = KafkaError("errno=104")
+        
+        # Third producer succeeds
+        successful_send_future = Mock()
+        message_metadata = Mock()
+        message_metadata.partition = 0
+        message_metadata.offset = 100
+        successful_send_future.get.return_value = message_metadata
+        
+        # Setup mock producers
+        self.mock_producer.send.return_value = first_connection_error_future
+        first_recreated_producer.send.return_value = second_connection_error_future
+        second_recreated_producer.send.return_value = successful_send_future
+        
+        # Mock get_kafka_producer to return each producer in sequence (one per attempt)
+        # and recreate_kafka_producer to just be called (the global update is simulated
+        # by get_kafka_producer returning the next producer on the following iteration)
+        with patch('scan.get_kafka_producer', side_effect=[self.mock_producer, first_recreated_producer, second_recreated_producer]):
+            with patch('scan.recreate_kafka_producer') as mock_recreate:
+                with patch('scan.time.sleep'):  # Skip actual sleep
+                    result = send_with_retry(
+                        "test-topic",
+                        {"test": "message"},
+                        max_retries=3
+                    )
+        
+        # Should succeed after multiple recreations
+        self.assertTrue(result)
+        
+        # Verify recreate_kafka_producer was called twice
+        self.assertEqual(mock_recreate.call_count, 2)
+        
+        # Verify each producer was called once
+        self.assertEqual(self.mock_producer.send.call_count, 1)
+        self.assertEqual(first_recreated_producer.send.call_count, 1)
+        self.assertEqual(second_recreated_producer.send.call_count, 1)
+        second_recreated_producer.flush.assert_called()
+
+
+class TestKafkaProducerManagement(unittest.TestCase):
+    """Tests for Kafka producer lifecycle management."""
+
+    def setUp(self):
+        """Reset global state before each test."""
+        reset_circuit_breaker()
+        close_kafka_producer()
+
+    def tearDown(self):
+        """Clean up after tests."""
+        reset_circuit_breaker()
+        close_kafka_producer()
+
+    @patch('scan.REX_KAFKA_BOOTSTRAP_SERVERS', None)
+    def test_get_producer_returns_none_when_not_configured(self):
+        """Should return None when bootstrap servers not configured."""
+        result = get_kafka_producer()
+        self.assertIsNone(result)
+
+    @patch('scan.REX_KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
+    @patch('scan.KafkaProducer')
+    def test_get_producer_creates_new_producer(self, mock_kafka_producer_class):
+        """Should create a new producer when none exists."""
+        mock_producer = Mock()
+        mock_kafka_producer_class.return_value = mock_producer
+
+        result = get_kafka_producer()
+
+        self.assertEqual(result, mock_producer)
+        mock_kafka_producer_class.assert_called_once()
+
+    @patch('scan.REX_KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
+    @patch('scan.KafkaProducer')
+    def test_get_producer_reuses_existing_producer(self, mock_kafka_producer_class):
+        """Should reuse existing producer on subsequent calls."""
+        mock_producer = Mock()
+        mock_kafka_producer_class.return_value = mock_producer
+
+        result1 = get_kafka_producer()
+        result2 = get_kafka_producer()
+
+        self.assertEqual(result1, result2)
+        mock_kafka_producer_class.assert_called_once()  # Only created once
+
+    @patch('scan.REX_KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
+    @patch('scan.KafkaProducer')
+    def test_recreate_producer_closes_old_and_creates_new(self, mock_kafka_producer_class):
+        """Should close old producer and create new one."""
+        mock_producer1 = Mock()
+        mock_producer2 = Mock()
+        mock_kafka_producer_class.side_effect = [mock_producer1, mock_producer2]
+
+        # Create initial producer
+        result1 = get_kafka_producer()
+        self.assertEqual(result1, mock_producer1)
+
+        # Recreate
+        result2 = recreate_kafka_producer()
+        
+        self.assertEqual(result2, mock_producer2)
+        mock_producer1.close.assert_called_once()
+        self.assertEqual(mock_kafka_producer_class.call_count, 2)
+
+
+class TestKafkaScanFunctions(unittest.TestCase):
+    """Tests for kafka_start_scan and kafka_scan_results with retry logic."""
+
+    def setUp(self):
+        """Reset circuit breaker before each test."""
+        reset_circuit_breaker()
+        self.mock_producer = Mock()
+        self.mock_s3_object = Mock()
+        self.mock_s3_object.bucket_name = "test-bucket"
+        self.mock_s3_object.key = "test-key"
+        self.mock_s3_object.version_id = "v1"
+
+    def tearDown(self):
+        """Clean up after tests."""
+        reset_circuit_breaker()
+
+    @patch('scan.send_with_retry')
+    def test_kafka_start_scan_success(self, mock_send):
+        """kafka_start_scan should return True on success."""
+        mock_send.return_value = True
+
+        result = kafka_start_scan(
+            self.mock_s3_object,
+            "scan-start-topic",
+            "2024-01-01 00:00:00"
+        )
+
+        self.assertTrue(result)
+        mock_send.assert_called_once()
+
+    @patch('scan.send_with_retry')
+    def test_kafka_start_scan_failure(self, mock_send):
+        """kafka_start_scan should return False on failure."""
+        mock_send.return_value = False
+
+        result = kafka_start_scan(
+            self.mock_s3_object,
+            "scan-start-topic",
+            "2024-01-01 00:00:00"
+        )
+
+        self.assertFalse(result)
+
+    @patch('scan.send_with_retry')
+    def test_kafka_start_scan_circuit_breaker_open(self, mock_send):
+        """kafka_start_scan should handle circuit breaker open gracefully."""
+        mock_send.side_effect = CircuitBreakerOpen("Circuit open")
+
+        result = kafka_start_scan(
+            self.mock_s3_object,
+            "scan-start-topic",
+            "2024-01-01 00:00:00"
+        )
+
+        self.assertFalse(result)
+
+    @patch('scan.send_with_retry')
+    @patch('scan.AV_STATUS_PUBLISH_CLEAN', 'True')
+    def test_kafka_scan_results_success(self, mock_send):
+        """kafka_scan_results should return True on success."""
+        mock_send.return_value = True
+
+        result = kafka_scan_results(
+            self.mock_s3_object,
+            "CLEAN",
+            "OK",
+            "2024-01-01 00:00:00"
+        )
+
+        self.assertTrue(result)
+        mock_send.assert_called_once()
+
+    @patch('scan.send_with_retry')
+    @patch('scan.AV_STATUS_PUBLISH_CLEAN', 'False')
+    def test_kafka_scan_results_skips_clean_when_disabled(self, mock_send):
+        """kafka_scan_results should skip publishing when disabled for CLEAN."""
+        result = kafka_scan_results(
+            self.mock_s3_object,
+            "CLEAN",
+            "OK",
+            "2024-01-01 00:00:00"
+        )
+
+        self.assertTrue(result)  # Returns True (skipped successfully)
+        mock_send.assert_not_called()
+
+    @patch('scan.send_with_retry')
+    @patch('scan.AV_STATUS_PUBLISH_INFECTED', 'False')
+    def test_kafka_scan_results_skips_infected_when_disabled(self, mock_send):
+        """kafka_scan_results should skip publishing when disabled for INFECTED."""
+        result = kafka_scan_results(
+            self.mock_s3_object,
+            "INFECTED",
+            "Virus.Test",
+            "2024-01-01 00:00:00"
+        )
+
+        self.assertTrue(result)  # Returns True (skipped successfully)
+        mock_send.assert_not_called()
