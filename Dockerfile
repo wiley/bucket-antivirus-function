@@ -1,6 +1,6 @@
 FROM artifactory.aws.wiley.com/docker/amazonlinux:2023 as clamav
 
-ARG clamav_version=1.4.1
+ARG clamav_version=1.4.4
 
 RUN yum update -y
 RUN yum install -y cpio wget
