@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    paths-ignore:
+      - '.github/**'
+      - '.gitignore'
+      - '**.md'
+    branches:
+      - master
+  pull_request:
+    paths-ignore:
+      - '.github/**'
+      - '.gitignore'
+      - '**.md'
+    branches:
+      - master
+
+concurrency:
+  group: '${{ github.repository }}-ci-${{ github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    # Merge wiley/rex-github-actions REX-22861 (s3-av-lambda-ci.yml) before relying on @main.
+    uses: wiley/rex-github-actions/.github/workflows/s3-av-lambda-ci.yml@REX-22861
+    secrets:
+      GH_TOKEN: ${{ secrets.REX_GITHUB_TOKEN }}
