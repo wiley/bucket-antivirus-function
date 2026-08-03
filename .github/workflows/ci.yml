@@ -1,0 +1,255 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    paths-ignore:
+      - '.github/**'
+      - '.gitignore'
+      - '**.md'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GH_TOKEN: ${{ secrets.REX_GITHUB_TOKEN }}
+  APP_NAME: bucket-antivirus-function
+  ARTIFACTORY_HOST: artifactory.aws.wiley.com
+  BINARY_REPO_VIRTUAL: Binary
+  BINARY_REPO_RELEASES: Releases
+  BINARY_REPO_SNAPSHOTS: Snapshots
+  REX_GROUP: com/wiley/rex
+
+jobs:
+  setup:
+    runs-on: rex-default-runner
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      artifactory_user: ${{ steps.creds.outputs.artifactory_user }}
+      artifactory_password: ${{ steps.creds.outputs.artifactory_password }}
+    steps:
+      - uses: wiley/rex-github-actions/packages/rex-aws-setup@main
+
+      - name: Get Artifactory credentials
+        id: creds
+        uses: wiley/rex-github-actions/packages/qe-artifactory-creds@main
+
+  check-sensitive-info:
+    runs-on: rex-runner-s
+    timeout-minutes: 15
+    container: artifactory.aws.wiley.com/docker/zricethezav/gitleaks:v8.25.1
+    steps:
+      # https://github.com/actions/checkout/issues/1014
+      - name: Cleanup old checkout
+        run: |
+          workspace="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must be set}"
+          chmod -R +w "${workspace}"
+          find "${workspace}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ env.GH_TOKEN }}
+
+      - name: Run gitleaks
+        run: gitleaks detect -v --no-git
+
+  prepare:
+    needs: [setup, check-sensitive-info]
+    runs-on: rex-runner-s
+    timeout-minutes: 15
+    container: 526839183759.dkr.ecr.us-east-1.amazonaws.com/rex-gha-base
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      skip_build: ${{ steps.skip.outputs.skip_build }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ env.GH_TOKEN }}
+          fetch-depth: 50
+
+      - name: Fix git permissions
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Generate version label
+        id: version
+        run: |
+          hash=$(git rev-parse --short HEAD)
+          count=$(git rev-list --count HEAD)
+          branch="${{ github.ref_name }}"
+          minor_version="0"
+
+          if [[ "$branch" == "${{ github.event.repository.default_branch }}" ]]; then
+            version="${count}.${minor_version}-${hash}"
+          else
+            escaped_branch=$(echo "$branch" | sed 's|/|-|g')
+            version="${count}.${minor_version}-${escaped_branch}-${hash}-SNAPSHOT"
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "### $version" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check if artifact already published
+        id: skip
+        env:
+          ARTIFACT_REPO_USERNAME: ${{ needs.setup.outputs.artifactory_user }}
+          ARTIFACT_REPO_PASSWORD: ${{ needs.setup.outputs.artifactory_password }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          url="https://${ARTIFACTORY_HOST}/artifactory/api/storage/${BINARY_REPO_VIRTUAL}/${REX_GROUP}/${APP_NAME}/${VERSION}/"
+          status=$(curl -s -o /dev/null -w '%{http_code}' -u "${ARTIFACT_REPO_USERNAME}:${ARTIFACT_REPO_PASSWORD}" -I "$url")
+
+          if [[ "$status" == "200" ]]; then
+            echo "Artifact already published at $url — skipping build"
+            echo "skip_build=true" >> "$GITHUB_OUTPUT"
+            echo "### Build skipped (already published)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Artifact not found (HTTP $status) — proceeding with build"
+            echo "skip_build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  test:
+    needs: prepare
+    if: needs.prepare.outputs.skip_build != 'true'
+    runs-on: rex-runner-s
+    timeout-minutes: 30
+    container: 526839183759.dkr.ecr.us-east-1.amazonaws.com/rex-gha-python
+    steps:
+      # https://github.com/actions/checkout/issues/1014
+      - name: Cleanup old checkout
+        run: |
+          workspace="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must be set}"
+          chmod -R +w "${workspace}"
+          find "${workspace}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ env.GH_TOKEN }}
+
+      - name: Install dependencies and run tests
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends make
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          make test
+
+  build-and-publish:
+    needs: [setup, prepare, test]
+    if: needs.prepare.outputs.skip_build != 'true'
+    runs-on: rex-runner-s
+    timeout-minutes: 20
+    container: 526839183759.dkr.ecr.us-east-1.amazonaws.com/rex-gha-buildah
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      ARTIFACT_REPO_USERNAME: ${{ needs.setup.outputs.artifactory_user }}
+      ARTIFACT_REPO_PASSWORD: ${{ needs.setup.outputs.artifactory_password }}
+      REGISTRY_AUTH_FILE: ${{ github.workspace }}/.config/containers/auth.json
+      BUILDAH_FORMAT: docker
+    steps:
+      # https://github.com/actions/checkout/issues/1014
+      - name: Cleanup old checkout
+        run: |
+          workspace="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must be set}"
+          chmod -R +w "${workspace}"
+          find "${workspace}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ env.GH_TOKEN }}
+
+      - name: Configure Artifactory Docker auth
+        run: |
+          mkdir -p .config/containers
+          auth=$(echo -n "${ARTIFACT_REPO_USERNAME}:${ARTIFACT_REPO_PASSWORD}" | base64 -w 0)
+          auth_entry=$(jq -cn --arg auth "$auth" '$ARGS.named')
+          registry_entry=$(jq -cn --argjson artifactory.aws.wiley.com/docker "$auth_entry" '$ARGS.named')
+          jq -n --argjson auths "$registry_entry" '$ARGS.named' > "${REGISTRY_AUTH_FILE}"
+
+      - name: Clean build artifacts
+        run: |
+          rm -rf bin/ build/ tmp/
+          rm -f .coverage
+          find ./ -type f -name '*.pyc' -delete
+          find ./ -type d -name '__pycache__' -delete
+
+      - name: Build lambda zip with buildah
+        run: |
+          set -euo pipefail
+          buildah bud \
+            --file Dockerfile \
+            --tag localhost/bucket-antivirus-function:latest \
+            .
+
+          cid=$(buildah from localhost/bucket-antivirus-function:latest)
+          mkdir -p build
+          # Extract the pre-built lambda.zip from the image (mirrors Makefile `docker run ... cp`)
+          buildah unshare --mount "mnt=${cid}" \
+            sh -c "cp \"\$mnt/opt/app/build/lambda.zip\" \"build/${VERSION}.zip\""
+          buildah rm "$cid"
+
+          ls -lh "build/${VERSION}.zip"
+
+      - name: Publish artifact to Artifactory
+        run: |
+          set -euo pipefail
+          repo="${{ github.ref_name == github.event.repository.default_branch && env.BINARY_REPO_RELEASES || env.BINARY_REPO_SNAPSHOTS }}"
+          target_url="https://${ARTIFACTORY_HOST}/artifactory/${repo}/${REX_GROUP}/${APP_NAME}/${VERSION}/${VERSION}.zip"
+
+          echo "Uploading build/${VERSION}.zip to ${target_url}"
+          curl -sfS -X PUT \
+            -u "${ARTIFACT_REPO_USERNAME}:${ARTIFACT_REPO_PASSWORD}" \
+            -T "build/${VERSION}.zip" \
+            "${target_url}"
+
+  save-versions:
+    needs: [prepare, build-and-publish]
+    if: |
+      always() &&
+      needs.prepare.result == 'success' &&
+      (
+        needs.prepare.outputs.skip_build == 'true' ||
+        needs.build-and-publish.result == 'success'
+      ) &&
+      github.ref_name == github.event.repository.default_branch
+    runs-on: rex-runner-s
+    timeout-minutes: 5
+    container: 526839183759.dkr.ecr.us-east-1.amazonaws.com/rex-gha-base
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ env.GH_TOKEN }}
+          fetch-tags: true
+
+      - name: Fix git permissions
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Commit changes and push tag
+        run: |
+          git config --global user.name 'wmuser-rex'
+          git config --global user.email 'wmuser-rex@users.noreply.github.com'
+          git config --global --add safe.directory $GITHUB_WORKSPACE
+
+          git tag -a "$VERSION" -m "chore(release): $VERSION"
+          git push origin "$VERSION"
+
+      - name: Write versions.json
+        run: |
+          jq -n \
+            --arg version "$VERSION" \
+            '{ "av-scan": $version, "av-update": $version }' > versions.json
+          cat versions.json
+          echo "Saved versions: $(cat versions.json)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create release
+        run: |
+          gh release create ${{ inputs.version }} --generate-notes
+
+      - name: Upload versions.json file to release
+        run: |
+          gh release upload ${{ inputs.version }} versions.json
