@@ -1,0 +1,24 @@
+name: Lint PR
+
+on:
+  merge_group:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+    branches:
+      - master
+
+concurrency:
+  group: lint-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: read
+
+jobs:
+  lint:
+    uses: wiley/rex-github-actions/.github/workflows/pr-title-lint.yml@main
+    secrets:
+      GH_TOKEN: ${{ secrets.REX_GITHUB_TOKEN }}
